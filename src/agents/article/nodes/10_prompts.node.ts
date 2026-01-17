@@ -8,17 +8,47 @@
  *
  * 设计原则:
  * - 每个核心段落生成一个提示词
- * - 考虑图片方向和比例
- * - 使用英文提示词(大多数模型)
+ * - 根据选定风格使用对应的 Style Prefix
+ * - 统一使用 16:9 比例（公众号）
+ * - 使用英文提示词
  */
 
-import { ArticleState } from "../state";
+import { ArticleState, ImageStyle } from "../state";
 import { getNodeLLMConfig } from "../../../config/llm.js";
 import { LLMClient } from "../../../utils/llm-client.js";
 import { config } from "dotenv";
 import { resolve } from "path";
 
 config({ path: resolve(process.cwd(), ".env") });
+
+/**
+ * 风格 Prefix 映射
+ *
+ * 参考 image-prompter 技能的五风格定义
+ * 统一使用 16:9 横屏比例
+ */
+const STYLE_PREFIXES: Record<ImageStyle, string> = {
+  infographic: `Create a clean 16:9 horizontal infographic. Flat vector style, white background, simple thin-outline icons, single bright accent color. Minimal text: a large Chinese title + 3-4 ultra-short labels max. No gradients, no heavy shadows.`,
+
+  healing: `Warm pastel color, soft light, cozy healing illustration, clean lineart, gentle shading. Clean 16:9 horizontal layout.`,
+
+  pixar: `Pixar style, sharpie illustration, bold lines and solid colors, simple details, minimalist, 3D cartoon style, vibrant colors. Cartoon, energetic, concise, childlike wonder. Clean 16:9 horizontal layout.`,
+
+  sokamono: `Cartoon illustration, minimalist, simple and vivid lines, calm healing atmosphere, clean and fresh color, light blue background, style by sokamono. Clean 16:9 horizontal layout.`,
+
+  handdrawn: `Hand-drawn notebook style on grid paper, marker pen and ballpoint pen, light gray background with paper texture and grid lines, rough ink lines, uneven width 2px-4px, high saturation colors at 90% transparency for highlights and decorative elements only. Use bright green for positive accents, alert red for attention markers, calm blue for structural elements, warm yellow for emphasis. Clean 16:9 horizontal layout.`
+};
+
+/**
+ * 风格名称映射（中文）
+ */
+const STYLE_NAMES: Record<ImageStyle, string> = {
+  infographic: "扁平化科普图",
+  healing: "治愈系插画",
+  pixar: "粗线条插画",
+  sokamono: "描边插画",
+  handdrawn: "方格纸手绘"
+};
 
 /**
  * 图片提示词
@@ -48,12 +78,12 @@ export async function promptsNode(state: ArticleState): Promise<Partial<ArticleS
   // 获取图片配置
   const imageConfig = state.decisions?.images;
   const count = imageConfig?.count || 4;
-  const orientation = imageConfig?.orientation || "landscape";
+  const style: ImageStyle = imageConfig?.style || "infographic";
 
-  console.log(`[10_prompts] Config: ${count} images, ${orientation} orientation`);
+  console.log(`[10_prompts] Config: ${count} images, style: ${STYLE_NAMES[style]}`);
 
   // ========== 构建 Prompt ==========
-  const prompt = buildPromptPrompt(state.humanized, count, orientation);
+  const prompt = buildPromptPrompt(state.humanized, count, style);
 
   // ========== 调用 LLM ==========
   const llmConfig = getNodeLLMConfig("image_prompt");
@@ -76,7 +106,7 @@ export async function promptsNode(state: ArticleState): Promise<Partial<ArticleS
     console.log(`[10_prompts] Generated ${promptStrings.length} prompts:`);
     prompts.forEach((p, i) => {
       console.log(`  ${i + 1}. ${p.paragraph_summary}`);
-      console.log(`     ${p.prompt.substring(0, 60)}...`);
+      console.log(`     ${p.prompt.substring(0, 80)}...`);
     });
 
     return {
@@ -85,8 +115,8 @@ export async function promptsNode(state: ArticleState): Promise<Partial<ArticleS
   } catch (error) {
     console.error(`[10_prompts] Failed to generate prompts: ${error}`);
 
-    // 降级: 返回通用提示词
-    const fallbackPrompts = generateFallbackPrompts(count);
+    // 降级: 返回风格化通用提示词
+    const fallbackPrompts = generateFallbackPrompts(count, style);
     console.log("[10_prompts] Using fallback prompts");
 
     return {
@@ -98,9 +128,12 @@ export async function promptsNode(state: ArticleState): Promise<Partial<ArticleS
 /**
  * 构建提示词生成 Prompt
  */
-function buildPromptPrompt(article: string, count: number, orientation: string): string {
+function buildPromptPrompt(article: string, count: number, style: ImageStyle): string {
   // 提取文章摘要
   const summary = extractSummary(article);
+
+  const stylePrefix = STYLE_PREFIXES[style];
+  const styleName = STYLE_NAMES[style];
 
   const lines: string[] = [];
 
@@ -112,26 +145,39 @@ function buildPromptPrompt(article: string, count: number, orientation: string):
 
   lines.push("配图要求:");
   lines.push(`  1. 数量: ${count} 张`);
-  lines.push(`  2. 方向: ${orientation === "landscape" ? "横屏 (16:9)" : "竖屏 (3:4)"}`);
-  lines.push("  3. 风格: 扁平化科普图或治愈系插画");
-  lines.push("  4. 情感基调: 专业但友好");
+  lines.push(`  2. 风格: ${styleName}`);
+  lines.push(`  3. 比例: 16:9 横屏（公众号统一）`);
+  lines.push("");
+
+  lines.push("风格规范（必须严格遵守）:");
+  lines.push(stylePrefix);
+  lines.push("");
+
+  lines.push("负面约束:");
+  lines.push("  - no watermark, no logo, no random letters, no gibberish text");
+  lines.push("  - avoid overcrowded layout, avoid messy typography");
+  if (style === "handdrawn") {
+    lines.push("  - colors are for decorative highlights only, do NOT generate text labels with colors");
+    lines.push("  - avoid functional labels like 'correct', 'warning', 'success' as text");
+  }
   lines.push("");
 
   lines.push("输出格式:");
   lines.push("请输出 JSON 数组,每个元素包含:");
   lines.push("  - paragraph_index: 对应段落序号");
   lines.push("  - paragraph_summary: 段落摘要");
-  lines.push("  - prompt: 英文图片提示词");
+  lines.push("  - prompt: 英文图片提示词（必须包含上述风格规范）");
   lines.push("  - style: 风格描述");
   lines.push("  - mood: 情感基调");
   lines.push("");
+
   lines.push("示例:");
   lines.push(`[
   {
     "paragraph_index": 1,
     "paragraph_summary": "AI Agent 概念介绍",
-    "prompt": "A futuristic illustration showing AI agents as helpful digital assistants, clean flat design, blue and white color scheme, modern tech aesthetic",
-    "style": "扁平化科普图",
+    "prompt": "AI agents as helpful digital assistants working alongside humans, ${stylePrefix.substring(0, 100)}...",
+    "style": "${styleName}",
     "mood": "专业、友好"
   }
 ]`);
@@ -155,17 +201,22 @@ const PROMPT_SYSTEM_MESSAGE = `你是一个专业的配图设计师,擅长为文
 2. 环境清晰: 背景和场景
 3. 风格统一: 与其他配图协调
 4. 色彩和谐: 符合情感基调
-
-常用风格:
-- 扁平化科普图: 简洁、清晰、信息性强
-- 治愈系插画: 温暖、友好、感性
-- 等距视角: 现代、专业、科技感
+5. 严格遵守风格规范
 
 提示词结构:
-[主体描述] + [环境/背景] + [风格描述] + [色彩/光影] + [技术/质量]
+[主体描述] + [环境/背景] + [风格规范] + [负面约束] + [技术参数]
 
-示例:
-"A cute robot assistant helping a human work, flat illustration style, soft blue and orange colors, minimal background, high quality"`;
+颜色使用规范（重要）:
+- 颜色描述仅用于视觉装饰和高亮
+- 禁止在提示词中描述带颜色的功能性标签文字
+- 例如：不要写 "green checkmark" 或 "red warning label"
+- 应该写： "green decorative arrow", "red accent line"
+- 对于 handdrawn 风格尤其注意：颜色用于装饰元素，不是文字标签
+
+重要:
+- 必须在提示词中包含完整的风格规范
+- 风格规范会在用户提示中提供
+- 确保提示词可直接用于图像生成模型`;
 
 /**
  * 解析 LLM 输出的提示词
@@ -199,17 +250,53 @@ function parsePrompts(text: string): ImagePrompt[] {
 }
 
 /**
- * 生成降级提示词
+ * 生成风格化降级提示词
  */
-function generateFallbackPrompts(count: number): string[] {
-  const templates = [
-    "Professional flat illustration explaining a technical concept, clean design, blue and white colors, modern aesthetic, high quality",
-    "Friendly robot assistant helping user work, flat illustration style, soft colors, minimal background, cute and approachable",
-    "Data visualization chart with clean design, professional look, blue accent colors, modern tech style, high quality",
-    "Collaboration scene with people and technology, flat illustration, harmonious colors, positive atmosphere, professional quality",
-    "Future cityscape with digital elements, clean sci-fi style, blue and purple tones, modern aesthetic, high quality"
-  ];
+function generateFallbackPrompts(count: number, style: ImageStyle): string[] {
+  const stylePrefix = STYLE_PREFIXES[style];
 
+  // 通用负面约束
+  const negativeConstraints = "no watermark, no logo, no random letters, no gibberish text, avoid overcrowded layout";
+
+  const templatesMap: Record<ImageStyle, string[]> = {
+    infographic: [
+      `Professional concept explanation, clean infographic design, icons and arrows, blue and white colors, ${stylePrefix}, ${negativeConstraints}`,
+      `Step-by-step process visualization, flat vector style, numbered steps, clean layout, ${stylePrefix}, ${negativeConstraints}`,
+      `Comparison diagram showing before/after, simple icons, clear contrast, ${stylePrefix}, ${negativeConstraints}`,
+      `Data visualization chart with clean design, professional look, blue accent colors, ${stylePrefix}, ${negativeConstraints}`,
+      `Technical concept explanation, simple icons and labels, minimal background, ${stylePrefix}, ${negativeConstraints}`
+    ],
+    healing: [
+      `Cozy indoor scene with warm light, peaceful atmosphere, ${stylePrefix}, ${negativeConstraints}`,
+      `Person reading by window with plants, warm afternoon light, ${stylePrefix}, ${negativeConstraints}`,
+      `Comfortable workspace with soft colors, gentle lighting, ${stylePrefix}, ${negativeConstraints}`,
+      `Morning coffee scene with peaceful mood, soft pastel tones, ${stylePrefix}, ${negativeConstraints}`,
+      `Relaxing moment in daily life, warm and healing atmosphere, ${stylePrefix}, ${negativeConstraints}`
+    ],
+    pixar: [
+      `Friendly robot assistant helping human work, energetic scene, ${stylePrefix}, ${negativeConstraints}`,
+      `Cute characters collaborating on project, vibrant colors, ${stylePrefix}, ${negativeConstraints}`,
+      `Playful learning scene with cartoon characters, joyful mood, ${stylePrefix}, ${negativeConstraints}`,
+      `Adventure scene with cute protagonists, dynamic composition, ${stylePrefix}, ${negativeConstraints}`,
+      `Teamwork scene with animated characters, positive energy, ${stylePrefix}, ${negativeConstraints}`
+    ],
+    sokamono: [
+      `Peaceful scene with simple lines, calming atmosphere, ${stylePrefix}, ${negativeConstraints}`,
+      `Minimalist illustration of daily life, clean and fresh, ${stylePrefix}, ${negativeConstraints}`,
+      `Quiet moment with simple composition, healing mood, ${stylePrefix}, ${negativeConstraints}`,
+      `Gentle scene with soft colors, clean lines, ${stylePrefix}, ${negativeConstraints}`,
+      `Serene landscape with minimalist style, calming effect, ${stylePrefix}, ${negativeConstraints}`
+    ],
+    handdrawn: [
+      `Hand-drawn concept explanation with arrows and highlights, ${stylePrefix}, ${negativeConstraints}`,
+      `Notebook-style learning notes with doodles and underlines, ${stylePrefix}, ${negativeConstraints}`,
+      `Sketch-style diagram with hand-drawn elements, markers, ${stylePrefix}, ${negativeConstraints}`,
+      `Handwritten notes with colorful highlights and stars, ${stylePrefix}, ${negativeConstraints}`,
+      `Grid paper style concept map with hand-drawn connections, ${stylePrefix}, ${negativeConstraints}`
+    ]
+  };
+
+  const templates = templatesMap[style] || templatesMap.infographic;
   return templates.slice(0, count);
 }
 
@@ -227,3 +314,14 @@ function extractSummary(article: string): string {
     ? cleaned.substring(0, 500) + "..."
     : cleaned;
 }
+
+/**
+ * 节点信息（用于文档和调试）
+ */
+export const promptsNodeInfo = {
+  name: "prompts",
+  type: "llm" as const,
+  description: "基于人化文章和选定风格生成图片提示词",
+  reads: ["humanized", "decisions.images"],
+  writes: ["imagePrompts"]
+};

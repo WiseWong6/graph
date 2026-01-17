@@ -17,6 +17,37 @@ import { ArticleState } from "../state";
 import { httpPost } from "../../../adapters/mcp.js";
 
 /**
+ * 并发控制 - 并行执行多个异步任务
+ */
+async function parallelMap<T, R>(
+  items: T[],
+  fn: (item: T, index: number) => Promise<R>,
+  concurrency: number
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  const executing: Promise<void>[] = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const promise = fn(items[i], i).then(result => {
+      results[i] = result;
+    });
+
+    executing.push(promise);
+
+    if (executing.length >= concurrency) {
+      await Promise.race(executing);
+      executing.splice(
+        executing.findIndex(p => p === promise),
+        1
+      );
+    }
+  }
+
+  await Promise.all(executing);
+  return results;
+}
+
+/**
  * 微信 API 配置
  */
 interface WechatConfig {
@@ -60,36 +91,47 @@ export async function uploadImagesNode(state: ArticleState): Promise<Partial<Art
   console.log(`[10.5_upload] Account: ${account || "default"}`);
   console.log(`[10.5_upload] Uploading ${state.imagePaths.length} images...`);
 
-  // ========== 批量上传 ==========
+  // ========== 并行上传 ==========
+  const concurrency = parseInt(process.env.UPLOAD_CONCURRENCY || "5");
+
+  console.log(`[10.5_upload] Starting parallel upload (concurrency: ${concurrency})...`);
+
+  const uploadResults = await parallelMap(
+    state.imagePaths,
+    async (imagePath, index) => {
+      console.log(`[10.5_upload] Uploading ${index + 1}/${state.imagePaths.length}: ${imagePath}`);
+
+      try {
+        // 读取图片
+        if (!existsSync(imagePath)) {
+          console.error(`[10.5_upload] File not found: ${imagePath}`);
+          return { index, url: null as string | null };
+        }
+
+        const imageBuffer = readFileSync(imagePath);
+        const base64 = imageBuffer.toString("base64");
+
+        // 上传
+        const result = await uploadImage(base64, config);
+
+        // 避免频率限制
+        await delay(300);
+
+        return { index, url: result.url };
+      } catch (error) {
+        console.error(`[10.5_upload] Failed to upload ${imagePath}: ${error}`);
+        return { index, url: null as string | null };
+      }
+    },
+    concurrency
+  );
+
+  // 整理结果
   const uploadedUrls: string[] = [];
-
-  for (let i = 0; i < state.imagePaths.length; i++) {
-    const imagePath = state.imagePaths[i];
-    console.log(`[10.5_upload] Uploading ${i + 1}/${state.imagePaths.length}: ${imagePath}`);
-
-    try {
-      // 读取图片
-      if (!existsSync(imagePath)) {
-        console.error(`[10.5_upload] File not found: ${imagePath}`);
-        continue;
-      }
-
-      const imageBuffer = readFileSync(imagePath);
-      const base64 = imageBuffer.toString("base64");
-
-      // 上传
-      const result = await uploadImage(base64, config);
-
-      if (result.url) {
-        uploadedUrls.push(result.url);
-        console.log(`[10.5_upload] Uploaded: ${result.url}`);
-      }
-
-      // 避免频率限制
-      await delay(500);
-    } catch (error) {
-      console.error(`[10.5_upload] Failed to upload ${imagePath}: ${error}`);
-      // 继续上传下一张
+  for (const result of uploadResults) {
+    if (result.url) {
+      uploadedUrls[result.index] = result.url;
+      console.log(`[10.5_upload] Uploaded: ${result.url}`);
     }
   }
 

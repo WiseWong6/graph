@@ -2,26 +2,27 @@
  * Gate B: 确认图片配置
  *
  * 触发时机: 图片提示词生成前执行
- * 功能: 让用户配置图片生成参数（方向、数量、比例等）
+ * 功能: 让用户配置图片生成参数（风格、数量）
  *
  * 交互 UI:
  * ```
- * ? 请配置图片生成参数（支持简写 "横屏，4张"）:
+ * === 图片风格推荐 ===
+ * 基于文章内容分析，推荐使用: [扁平化科普图]
  *
- * ? 图片方向:
- *   1. 横屏 (16:9)
- *   2. 竖屏 (3:4)
+ * 理由: 文章包含"解释"、"原理"等科普关键词
+ *
+ * ? 请选择图片风格:
+ *   1. 扁平化科普图 (推荐) - Flat vector style, white background
+ *   2. 治愈系插画 - Warm pastel color, soft light
+ *   3. 粗线条插画 - Pixar style, bold lines
+ *   4. 描边插画 - Minimalist, clean lines
+ *   5. 方格纸手绘 - Hand-drawn notebook style
  *
  * ? 生成数量: 4
  *
- * ? 封面图比例（回车使用默认 16:9）:
- * ? 正文图比例（回车使用默认 16:9）:
- *
  * === 配置确认 ===
- * 方向: 横屏
+ * 风格: 扁平化科普图
  * 数量: 4 张
- * 封面比例: 16:9
- * 正文比例: 16:9
  * 模型: doubao-seedream-4-5-251128
  * 分辨率: 2k
  *
@@ -31,7 +32,7 @@
  * 存储位置: state.decisions.images
  */
 
-import { ArticleState, ImageConfig } from "../state";
+import { ArticleState, ImageConfig, ImageStyle } from "../state";
 
 /**
  * 交互提示函数类型
@@ -64,54 +65,127 @@ async function getPromptFn(): Promise<InteractivePrompt> {
 }
 
 /**
+ * 风格关键词映射
+ */
+const STYLE_KEYWORDS: Record<ImageStyle, string[]> = {
+  infographic: ["解释", "原理", "是什么", "如何", "步骤", "科普", "说明"],
+  healing: ["故事", "情绪", "场景", "温暖", "治愈", "叙事", "氛围"],
+  pixar: ["卡通", "可爱", "童趣", "活力", "鲜艳", "3d", "动画"],
+  sokamono: ["清新", "简洁", "文艺", "淡雅", "描边", "治愈", "清新"],
+  handdrawn: ["笔记", "手绘", "草图", "学习", "手写", "方格", "马克笔"]
+};
+
+/**
+ * 风格名称映射（中文）
+ */
+const STYLE_NAMES: Record<ImageStyle, string> = {
+  infographic: "扁平化科普图",
+  healing: "治愈系插画",
+  pixar: "粗线条插画",
+  sokamono: "描边插画",
+  handdrawn: "方格纸手绘"
+};
+
+/**
+ * 风格描述映射
+ */
+const STYLE_DESCRIPTIONS: Record<ImageStyle, string> = {
+  infographic: "Flat vector style, white background, simple thin-outline icons",
+  healing: "Warm pastel color, soft light, cozy healing illustration",
+  pixar: "Pixar style, sharpie illustration, bold lines and solid colors",
+  sokamono: "Cartoon illustration, minimalist, simple and vivid lines",
+  handdrawn: "Hand-drawn notebook style on grid paper, marker pen"
+};
+
+/**
+ * 智能推荐风格
+ *
+ * 基于文章内容关键词分析
+ */
+function recommendStyle(content: string): ImageStyle {
+  const scores: Record<ImageStyle, number> = {
+    infographic: 0,
+    healing: 0,
+    pixar: 0,
+    sokamono: 0,
+    handdrawn: 0
+  };
+
+  // 统计每种风格的关键词出现次数
+  for (const [style, keywords] of Object.entries(STYLE_KEYWORDS)) {
+    for (const keyword of keywords) {
+      const regex = new RegExp(keyword, "gi");
+      const matches = content.match(regex);
+      if (matches) {
+        scores[style as ImageStyle] += matches.length;
+      }
+    }
+  }
+
+  // 返回得分最高的风格
+  let maxScore = 0;
+  let recommendedStyle: ImageStyle = "infographic";
+
+  for (const [style, score] of Object.entries(scores)) {
+    if (score > maxScore) {
+      maxScore = score;
+      recommendedStyle = style as ImageStyle;
+    }
+  }
+
+  return recommendedStyle;
+}
+
+/**
  * 智能解析图片配置
  *
  * 支持的输入格式:
- * - "横屏，4张"
- * - "横屏，4张，封面16:9，正文3:4"
- * - "竖屏 3张"
- * - "landscape 4"
+ * - "4张"
+ * - "扁平化，4张"
+ * - "healing 4"
+ * - "科普图，3张"
  *
  * @param input - 用户输入
+ * @param recommendedStyle - 推荐的风格
  */
-function parseImageConfig(input: string): ImageConfig {
+function parseImageConfig(input: string, recommendedStyle: ImageStyle): ImageConfig {
   const config: ImageConfig = {
     confirmed: false,
     count: 4,
-    orientation: "landscape",
-    poster_ratio: "16:9",
-    cover_ratio: "16:9",
+    style: recommendedStyle,
     model: "doubao-seedream-4-5-251128",
     resolution: "2k"
   };
 
   const text = input.toLowerCase();
 
-  // 解析方向
-  if (text.includes("横屏") || text.includes("landscape")) {
-    config.orientation = "landscape";
-    config.poster_ratio = "16:9";
-  } else if (text.includes("竖屏") || text.includes("portrait")) {
-    config.orientation = "portrait";
-    config.poster_ratio = "3:4";
+  // 解析风格（简写或中文）
+  const styleAliases: Record<string, ImageStyle> = {
+    "扁平": "infographic",
+    "科普": "infographic",
+    "infographic": "infographic",
+    "治愈": "healing",
+    "healing": "healing",
+    "粗线": "pixar",
+    "pixar": "pixar",
+    "描边": "sokamono",
+    "sokamono": "sokamono",
+    "手绘": "handdrawn",
+    "方格": "handdrawn",
+    "handdrawn": "handdrawn"
+  };
+
+  for (const [alias, style] of Object.entries(styleAliases)) {
+    if (text.includes(alias)) {
+      config.style = style;
+      break;
+    }
   }
 
   // 解析数量
   const countMatch = text.match(/(\d+)\s*[张张]/);
   if (countMatch) {
     config.count = parseInt(countMatch[1], 10);
-  }
-
-  // 解析封面比例
-  const coverMatch = input.match(/(?:封面|cover)[：:\s]*([\d:x]+)/i);
-  if (coverMatch) {
-    config.cover_ratio = coverMatch[1];
-  }
-
-  // 解析正文比例
-  const posterMatch = input.match(/(?:正文|poster|content)[：:\s]*([\d:x]+)/i);
-  if (posterMatch) {
-    config.poster_ratio = posterMatch[1];
   }
 
   return config;
@@ -122,10 +196,12 @@ function parseImageConfig(input: string): ImageConfig {
  *
  * 决策流程:
  * 1. 检查是否已确认 (state.decisions.images?.confirmed)
- * 2. 弹出输入框，支持简写格式
- * 3. 解析输入并显示确认信息
- * 4. 二次确认
- * 5. 保存决策到 state.decisions.images
+ * 2. 分析内容，推荐风格
+ * 3. 弹出风格选择输入框
+ * 4. 弹出数量输入框
+ * 5. 显示确认信息
+ * 6. 二次确认
+ * 7. 保存决策到 state.decisions.images
  */
 export async function confirmImagesNode(
   state: ArticleState
@@ -135,37 +211,76 @@ export async function confirmImagesNode(
   // 已确认，跳过
   if (existingConfig?.confirmed) {
     console.log(`[confirm_images] 使用已确认的配置:`);
-    console.log(`  方向: ${existingConfig.orientation === "landscape" ? "横屏" : "竖屏"}`);
+    console.log(`  风格: ${STYLE_NAMES[existingConfig.style]}`);
     console.log(`  数量: ${existingConfig.count} 张`);
     return {};
   }
 
   console.log("\n=== Gate B: 确认图片配置 ===\n");
 
+  // ========== 步骤1: 分析内容，推荐风格 ==========
+  const content = state.humanized || state.rewritten || state.polished || state.draft || "";
+  const recommendedStyle = recommendStyle(content);
+
+  console.log("=== 图片风格推荐 ===");
+  console.log(`基于文章内容分析，推荐使用: [${STYLE_NAMES[recommendedStyle]}]`);
+  console.log(`\n风格描述: ${STYLE_DESCRIPTIONS[recommendedStyle]}`);
+  console.log("");
+
+  // ========== 步骤2: 风格选择 ==========
   const prompt = await getPromptFn();
 
-  // 第一步：输入（支持简写）
-  const { input } = await prompt<{ input: string }>([
+  const { styleInput } = await prompt<{ styleInput: string }>([
     {
-      type: "input",
-      name: "input",
-      message: "请配置图片（支持简写如 \"横屏，4张\"）:",
-      default: "横屏，4张"
+      type: "list",
+      name: "styleInput",
+      message: "请选择图片风格:",
+      default: recommendedStyle,
+      choices: [
+        { name: `1. 扁平化科普图 (推荐) - Flat vector style, white background`, value: "infographic" },
+        { name: `2. 治愈系插画 - Warm pastel color, soft light`, value: "healing" },
+        { name: `3. 粗线条插画 - Pixar style, bold lines`, value: "pixar" },
+        { name: `4. 描边插画 - Minimalist, clean lines`, value: "sokamono" },
+        { name: `5. 方格纸手绘 - Hand-drawn notebook style`, value: "handdrawn" }
+      ]
     }
   ]);
 
-  // 第二步：解析
-  const config = parseImageConfig(input);
+  const selectedStyle = styleInput as ImageStyle;
 
-  console.log("\n解析结果:");
-  console.log(`  方向: ${config.orientation === "landscape" ? "横屏" : "竖屏"}`);
-  console.log(`  数量: ${config.count} 张`);
-  console.log(`  封面比例: ${config.cover_ratio}`);
-  console.log(`  正文比例: ${config.poster_ratio}`);
-  console.log(`  模型: ${config.model}`);
-  console.log(`  分辨率: ${config.resolution}\n`);
+  // ========== 步骤3: 数量输入（支持简写） ==========
+  const { countInput } = await prompt<{ countInput: string }>([
+    {
+      type: "input",
+      name: "countInput",
+      message: "请输入生成数量（支持简写如 \"4张\"）:",
+      default: "4张",
+      validate: (input: string) => {
+        const match = input.match(/(\d+)/);
+        if (!match) {
+          return "请输入有效的数字";
+        }
+        const count = parseInt(match[1], 10);
+        if (count < 1 || count > 20) {
+          return "数量必须在 1-20 之间";
+        }
+        return true;
+      }
+    }
+  ]);
 
-  // 第三步：二次确认
+  // ========== 步骤4: 解析配置 ==========
+  const config = parseImageConfig(countInput, selectedStyle);
+
+  console.log("\n=== 配置确认 ===");
+  console.log(`风格: ${STYLE_NAMES[config.style]}`);
+  console.log(`描述: ${STYLE_DESCRIPTIONS[config.style]}`);
+  console.log(`数量: ${config.count} 张`);
+  console.log(`模型: ${config.model}`);
+  console.log(`分辨率: ${config.resolution}`);
+  console.log(`比例: 16:9 (公众号统一横屏)\n`);
+
+  // ========== 步骤5: 二次确认 ==========
   const { confirmed } = await prompt<{ confirmed: boolean }>([
     {
       type: "confirm",
@@ -198,6 +313,6 @@ export const confirmImagesNodeInfo = {
   name: "confirm_images",
   type: "interactive" as const,
   gate: "B",
-  description: "确认图片生成配置（方向、数量、比例等）",
+  description: "确认图片生成配置（风格、数量）",
   writes: ["decisions.images"]
 };

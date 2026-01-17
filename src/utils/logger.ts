@@ -397,6 +397,13 @@ export class NodeLogger {
   skipStep(step: string, reason: string): void {
     this.warn(`[Step: ${step}] Skipped:`, reason);
   }
+
+  /**
+   * 分隔线
+   */
+  separator(char: string = "-", length: number = 50): void {
+    Logger.separator(char, length);
+  }
 }
 
 /**

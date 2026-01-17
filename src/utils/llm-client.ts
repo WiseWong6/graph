@@ -25,6 +25,12 @@ export interface LLMResponse {
   };
 }
 
+// Stream chunk - partial text from streaming
+export interface StreamChunk {
+  text: string;
+  done: boolean;
+}
+
 /**
  * Unified LLM client supporting multiple providers
  *
@@ -55,7 +61,64 @@ export class LLMClient {
   }
 
   /**
-   * OpenAI-compatible implementation
+   * Streaming version - yields text chunks as they arrive
+   * Returns AsyncGenerator for use with for-await loops
+   */
+  async *stream(options: LLMCallOptions): AsyncGenerator<StreamChunk> {
+    const provider = this.config.provider;
+
+    switch (provider) {
+      case "openai":
+      case "deepseek":
+        yield* this.streamOpenAICompatible(options);
+        break;
+      case "anthropic":
+        throw new Error("Anthropic streaming not yet implemented");
+      default:
+        const _exhaustive: never = provider;
+        throw new Error(`Unsupported provider: ${_exhaustive}`);
+    }
+  }
+
+  /**
+   * OpenAI-compatible streaming implementation
+   */
+  private async *streamOpenAICompatible(options: LLMCallOptions): AsyncGenerator<StreamChunk> {
+    const apiKey = this.getApiKey(
+      this.config.api_key_env || (this.config.provider === "deepseek" ? "DEEPSEEK_API_KEY" : "OPENAI_API_KEY")
+    );
+    const baseURL = this.config.base_url || (this.config.provider === "deepseek" ? "https://api.deepseek.com" : "https://api.openai.com/v1");
+
+    const client = new OpenAI({ apiKey, baseURL });
+
+    const messages: OpenAI.ChatCompletionMessageParam[] = [];
+    if (options.systemMessage) {
+      messages.push({ role: "system", content: options.systemMessage });
+    }
+    messages.push({ role: "user", content: options.prompt });
+
+    const stream = await client.chat.completions.create({
+      model: this.config.model,
+      messages,
+      max_tokens: options.maxTokens || this.config.max_tokens || 1024,
+      temperature: options.temperature || this.config.temperature || 0.7,
+      stream: true,
+    });
+
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content;
+      if (content) {
+        yield { text: content, done: false };
+      }
+      if (chunk.choices[0]?.finish_reason) {
+        yield { text: "", done: true };
+        break;
+      }
+    }
+  }
+
+  /**
+   * OpenAI-compatible implementation (non-streaming)
    * Used by both OpenAI and DeepSeek (which is API-compatible)
    *
    * This is the "happy path" - standard REST API, standard response format

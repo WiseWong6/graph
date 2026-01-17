@@ -1,5 +1,5 @@
 /**
- * Images 节点 v2 - 并行图片生成
+ * Images 节点 v3 - 使用 OpenAI SDK 调用火山 Ark API
  *
  * 职责: 调用火山 Ark API 生成本地图片
  *
@@ -16,7 +16,7 @@
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import { ArticleState } from "../state";
-import { httpPost } from "../../../adapters/mcp.js";
+import OpenAI from "openai";
 import { createLogger } from "../../../utils/logger.js";
 import { retry } from "../../../utils/errors.js";
 
@@ -29,29 +29,6 @@ interface ArkConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
-}
-
-/**
- * 图片生成请求
- */
-interface ImageGenerationRequest {
-  prompt: string;
-  model?: string;
-  size?: string;
-  quality?: string;
-  style?: string;
-}
-
-/**
- * 图片生成响应
- */
-interface ImageGenerationResponse {
-  success: boolean;
-  data?: {
-    image_url?: string;
-    image_base64?: string;
-  };
-  error?: string;
 }
 
 /**
@@ -116,12 +93,15 @@ export async function imagesNode(state: ArticleState): Promise<Partial<ArticleSt
   const config = getArkConfig();
   const imageConfig = state.decisions?.images;
 
-  // 确定尺寸
-  const size = imageConfig?.orientation === "portrait"
-    ? "768:1024"  // 3:4
-    : "1024:768"; // 16:9
+  // 统一使用 2K 尺寸（16:9 横屏）
+  const size = "2k";
 
-  log.info("Config:", { model: config.model, size });
+  log.info("Config:", {
+    model: config.model,
+    size,
+    count: state.imagePrompts.length,
+    style: imageConfig?.style || "infographic"
+  });
   log.completeStep("setup_config");
 
   // ========== 准备输出目录 ==========
@@ -139,7 +119,7 @@ export async function imagesNode(state: ArticleState): Promise<Partial<ArticleSt
 
   const results = await parallelMap(
     prompts,
-    async (prompt, index) => {
+    async (prompt, index): Promise<ImageResult> => {
       const filename = `image_${String(index + 1).padStart(2, "0")}.png`;
       const filepath = join(imagesDir, filename);
 
@@ -150,22 +130,23 @@ export async function imagesNode(state: ArticleState): Promise<Partial<ArticleSt
           { maxAttempts: 2, delay: 500 }
         )();
 
-        // 保存图片
-        if (imageData.image_base64) {
-          const buffer = Buffer.from(imageData.image_base64, "base64");
+        // 保存图片（从 URL 下载）
+        if (imageData.url) {
+          const imgResponse = await fetch(imageData.url);
+          const arrayBuffer = await imgResponse.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
           writeFileSync(filepath, buffer);
           progress.increment(`image_${index + 1}`);
           return { index, path: filepath };
-        } else if (imageData.image_url) {
-          log.warn(`Image ${index + 1} returned URL (not implemented)`);
-          return { index, path: imageData.image_url };
+        } else {
+          return { index, error: "No image data returned" };
         }
       } catch (error) {
         log.error(`Failed to generate image ${index + 1}:`, error);
         return { index, error: String(error) };
       }
     },
-    3 // 并发限制
+    parseInt(process.env.IMAGE_CONCURRENCY || "5")  // 并发限制（可配置）
   );
 
   progress.complete();
@@ -175,6 +156,8 @@ export async function imagesNode(state: ArticleState): Promise<Partial<ArticleSt
   const errors: string[] = [];
 
   for (const result of results) {
+    if (!result) continue;
+
     if (result.path) {
       imagePaths[result.index] = result.path;
     } else if (result.error) {
@@ -199,33 +182,33 @@ export async function imagesNode(state: ArticleState): Promise<Partial<ArticleSt
 }
 
 /**
- * 生成单张图片
+ * 生成单张图片（使用 OpenAI SDK）
  */
 async function generateImage(
   prompt: string,
   config: ArkConfig,
   size: string
-): Promise<{ image_url?: string; image_base64?: string }> {
-  const request: ImageGenerationRequest = {
-    prompt,
+): Promise<{ url: string }> {
+  const client = new OpenAI({
+    baseURL: config.baseUrl + "/api/v3",
+    apiKey: config.apiKey
+  });
+
+  const response = await client.images.generate({
     model: config.model,
-    size
-  };
+    prompt,
+    size: size as any,  // Ark 支持 "2k" 等自定义尺寸
+    response_format: "url",
+    watermark: false  // 关闭水印
+  });
 
-  const response = await httpPost<ImageGenerationResponse>(
-    `${config.baseUrl}/images/generations`,
-    request,
-    {
-      "Authorization": `Bearer ${config.apiKey}`,
-      "Content-Type": "application/json"
-    }
-  );
-
-  if (!response.success || !response.data) {
-    throw new Error(response.error || "Failed to generate image");
+  if (!response.data || !response.data[0] || !response.data[0].url) {
+    throw new Error("No image URL in response");
   }
 
-  return response.data;
+  return {
+    url: response.data[0].url
+  };
 }
 
 /**
@@ -239,8 +222,8 @@ function getArkConfig(): ArkConfig {
 
   return {
     apiKey,
-    baseUrl: process.env.ARK_BASE_URL || "https://ark.cn-beijing.volces.com/api/v3",
-    model: process.env.ARK_MODEL || "doubao-v1"
+    baseUrl: process.env.ARK_BASE_URL || "https://ark.cn-beijing.volces.com",
+    model: process.env.ARK_MODEL || "doubao-seedream-4-5-251128"
   };
 }
 

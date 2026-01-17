@@ -1,24 +1,35 @@
 /**
- * Titles 节点
+ * Titles 节点 v2
  *
  * 职责: 基于调研结果生成多个吸引人的标题选项
  *
  * 数据流:
- * research → key_findings → LLM 标题生成 → titles[]
+ * research → 解析 Brief → 检索参考标题 → LLM 标题生成 → titles[]
  *
  * 设计原则:
+ * - 使用 Brief 的推荐角度
+ * - 使用标题索引提供参考
  * - 生成 5-10 个标题选项
  * - 支持不同风格（疑问、数字、对比等）
- * - 突出差异化价值
  */
 
 import { ArticleState } from "../state";
 import { getNodeLLMConfig } from "../../../config/llm.js";
 import { LLMClient } from "../../../utils/llm-client.js";
+import IndexManager from "../../../rag/index/index-manager.js";
 import { config } from "dotenv";
 import { resolve } from "path";
 
 config({ path: resolve(process.cwd(), ".env") });
+
+/**
+ * 推荐角度（从 Brief 解析）
+ */
+interface RecommendedAngle {
+  name: string;
+  coreArgument: string;
+  evidence?: string[];
+}
 
 /**
  * 标题风格类型
@@ -44,18 +55,40 @@ interface TitleGenerationConfig {
 export async function titlesNode(state: ArticleState): Promise<Partial<ArticleState>> {
   console.log("[03_titles] Generating titles for topic:", state.topic);
 
-  // ========== 配置 ==========
+  // ========== 1. 解析 Brief 获取推荐角度 ==========
+  const angle = parseRecommendedAngle(state.researchResult || "");
+  console.log("[03_titles] Recommended angle:", angle?.name || "none");
+
+  // ========== 2. 检索参考标题 ==========
+  let referenceTitles: string[] = [];
+  try {
+    const indexManager = IndexManager.getInstance();
+    await indexManager.loadIndices();
+
+    const query = state.topic || state.prompt;
+    const retrieved = await indexManager.retrieveTitles(query, { topK: 5 });
+    referenceTitles = retrieved.map(r => r.title);
+
+    console.log(`[03_titles] Retrieved ${referenceTitles.length} reference titles:`);
+    referenceTitles.forEach((title, i) => {
+      console.log(`  ${i + 1}. ${title}`);
+    });
+  } catch (error) {
+    console.warn("[03_titles] Failed to retrieve reference titles:", error);
+  }
+
+  // ========== 3. 配置 ==========
   const titleConfig: TitleGenerationConfig = {
     count: 8,
     maxLength: 25,
     platform: state.decisions?.wechat?.account ? ["wechat"] : ["wechat"],
-    style: undefined // 不指定风格,让 LLM 自由发挥
+    style: undefined
   };
 
-  // ========== 构建 Prompt ==========
-  const prompt = buildTitlePrompt(state, titleConfig);
+  // ========== 4. 构建 Prompt ==========
+  const prompt = buildTitlePrompt(state, titleConfig, angle, referenceTitles);
 
-  // ========== 调用 LLM ==========
+  // ========== 5. 调用 LLM ==========
   const llmConfig = getNodeLLMConfig("title_gen");
   const client = new LLMClient(llmConfig);
 
@@ -69,7 +102,7 @@ export async function titlesNode(state: ArticleState): Promise<Partial<ArticleSt
 
     console.log("[03_titles] LLM response received, parsing titles...");
 
-    // ========== 解析标题 ==========
+    // ========== 6. 解析标题 ==========
     const titles = parseTitles(response.text, titleConfig.count);
 
     console.log(`[03_titles] Generated ${titles.length} titles:`);
@@ -96,41 +129,49 @@ export async function titlesNode(state: ArticleState): Promise<Partial<ArticleSt
 /**
  * 构建标题生成 Prompt
  */
-function buildTitlePrompt(state: ArticleState, config: TitleGenerationConfig): string {
+function buildTitlePrompt(
+  state: ArticleState,
+  config: TitleGenerationConfig,
+  angle: RecommendedAngle | null,
+  referenceTitles: string[]
+): string {
   const topic = state.topic || state.prompt;
-
-  // 提取关键要点
-  let keyPoints: string[] = [];
-  if (state.researchResult) {
-    // 简化版: 从 researchResult 中提取要点
-    // 实际应该解析 Brief 结构
-    keyPoints = [
-      "基于最新调研",
-      "数据支撑",
-      "实用性强"
-    ];
-  }
 
   const lines: string[] = [];
 
   lines.push(`请为主题"${topic}"生成 ${config.count} 个吸引人的标题。\n`);
 
-  if (keyPoints.length > 0) {
-    lines.push("参考要点:");
-    keyPoints.forEach((point, i) => {
-      lines.push(`  ${i + 1}. ${point}`);
+  // 推荐角度
+  if (angle) {
+    lines.push("## 推荐写作角度");
+    lines.push(`**${angle.name}**`);
+    lines.push(`- 核心观点: ${angle.coreArgument}`);
+    if (angle.evidence && angle.evidence.length > 0) {
+      lines.push(`- 论据: ${angle.evidence.join("; ")}`);
+    }
+    lines.push("");
+  }
+
+  // 参考标题
+  if (referenceTitles.length > 0) {
+    lines.push("## 参考标题（同类优质标题）");
+    referenceTitles.forEach((title, i) => {
+      lines.push(`${i + 1}. ${title}`);
     });
     lines.push("");
   }
 
-  lines.push("标题要求:");
+  lines.push("## 标题要求");
   lines.push(`  1. 长度: ${config.maxLength} 字以内`);
   lines.push("  2. 包含数字或疑问词,增加吸引力");
   lines.push("  3. 突出差异化价值");
   lines.push(`  4. 适合发布在 ${config.platform.join(" / ")}`);
+  if (angle) {
+    lines.push(`  5. 体现"${angle.name}"的角度`);
+  }
   lines.push("");
 
-  lines.push("标题风格参考:");
+  lines.push("## 标题风格参考");
   lines.push("  - 疑问式: XXX是什么?为什么XXX?");
   lines.push("  - 数字式: X个XXX技巧/方法");
   lines.push("  - 对比式: XXX vs YYY:哪个更好?");
@@ -138,13 +179,9 @@ function buildTitlePrompt(state: ArticleState, config: TitleGenerationConfig): s
   lines.push("  - 列表式: XXX必知/必做");
   lines.push("");
 
-  lines.push("输出格式:");
+  lines.push("## 输出格式");
   lines.push("请直接输出标题列表,每行一个,不要编号。");
   lines.push("");
-  lines.push("示例:");
-  lines.push("  AI Agent 是什么?一文读懂自动化未来");
-  lines.push("  2026年AI Agent发展报告:从概念到应用");
-  lines.push("  10个AI Agent实战案例:企业如何落地");
 
   return lines.join("\n");
 }
@@ -221,4 +258,43 @@ function generateFallbackTitles(topic: string): string[] {
   return templates
     .map(t => t.replace("{topic}", topic))
     .slice(0, 8);
+}
+
+/**
+ * 从 Brief 中解析推荐角度
+ */
+function parseRecommendedAngle(briefText: string): RecommendedAngle | null {
+  // 查找"推荐角度"部分
+  const angleMatch = briefText.match(/##?\s*推荐角度\s*\n([\s\S]+?)(?=##|\n\n|$)/i);
+  if (!angleMatch) return null;
+
+  const angleText = angleMatch[1];
+
+  // 提取角度名称（加粗文本）
+  const nameMatch = angleText.match(/\*\*([^*]+)\*\*/);
+  const name = nameMatch ? nameMatch[1].trim() : "默认角度";
+
+  // 提取核心论点
+  const argumentMatch = angleText.match(/核心论点[：:]\s*([^\n]+)/);
+  const coreArgument = argumentMatch ? argumentMatch[1].trim() : "";
+
+  // 提取论据
+  const evidence: string[] = [];
+  const evidenceLines = angleText.match(/^- .+/gm) || [];
+  for (const line of evidenceLines) {
+    const evidenceText = line.replace(/^-\s*/, "").trim();
+    if (evidenceText) {
+      evidence.push(evidenceText);
+    }
+  }
+
+  if (!name && !coreArgument) {
+    return null;
+  }
+
+  return {
+    name: name || "推荐角度",
+    coreArgument: coreArgument || angleText.slice(0, 100),
+    evidence: evidence.length > 0 ? evidence : undefined
+  };
 }

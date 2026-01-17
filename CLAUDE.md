@@ -1,6 +1,6 @@
 # Write Agent - 进度跟踪
 
-> 最后更新: 2026-01-17
+> 最后更新: 2026-01-18
 
 ## 项目概述
 
@@ -13,6 +13,7 @@
 - RAG 增强写作
 - 智性叙事重写 (Rewrite)
 - 交互式 CLI
+- 完整图片生成流程（Ark API）
 
 ---
 
@@ -23,12 +24,15 @@
 | Research 节点 | ✅ 完成 | 2026-01-17 | 搜索 + LLM 分析 + Brief |
 | Brief 质量 | ✅ 完成 | 2026-01-17 | 内容创作视角，多角度推荐 |
 | RAG 节点 | ✅ 代码完成 | 2026-01-17 | 索引构建待网络恢复后手动运行 |
+| Titles 节点 | ✅ 完成 | 2026-01-18 | 基于 Brief + RAG 标题检索 |
 | Draft 节点 | ✅ 完成 | 2026-01-17 | Brief + RAG 解析增强 |
 | Polish 节点 | ✅ 完成 | 2026-01-17 | 语言润色 |
 | Rewrite 节点 | ✅ 完成 | 2026-01-17 | 智性叙事重写 |
 | Humanize 节点 | ✅ 完成 | 2026-01-17 | 去机械化，增加活人感 |
-| 编译错误修复 | ✅ 完成 | 2026-01-17 | 全部通过 |
-| 交互式 CLI | ✅ 完成 | 2026-01-17 | `npm run research` |
+| Images 流程 | ✅ 完成 | 2026-01-18 | Prompts → 生成 → 上传 |
+| HTML 转换 | ✅ 完成 | 2026-01-18 | Markdown → 微信编辑器格式 |
+| 草稿箱发布 | ✅ 完成 | 2026-01-18 | 微信 API 集成 |
+| 完整工作流 | ✅ 完成 | 2026-01-18 | 15 节点全链路 |
 
 ---
 
@@ -130,18 +134,64 @@
   - Polish: Anthropic Sonnet (平衡)
 - [x] 节点级配置覆盖
 
+### Titles 节点 ✅
+
+**标题生成**:
+- [x] 基于 Brief 推荐角度生成标题
+- [x] RAG 标题库检索提供参考
+- [x] 生成 5-10 个候选标题
+- [x] 降级方案（模板标题）
+
+### Images 流程 ✅
+
+**Prompts 节点** (`10_prompts.node.ts`):
+- [x] 基于人化文章生成提示词
+- [x] 5 种风格支持（infographic/healing/pixar/sokamono/handdrawn）
+- [x] 风格 Prefix 完整嵌入
+- [x] 降级方案（风格化通用提示词）
+
+**Images 节点** (`11_images.node.ts`):
+- [x] Ark API (Doubao Seedream) 生图
+- [x] 并行生成（可配置并发）
+- [x] 保存到本地
+- [x] 错误重试机制
+- [x] **水印关闭** (`watermark: false`)
+
+**Upload Images 节点** (`11.5_upload_images.node.ts`):
+- [x] 上传到微信 CDN
+- [x] 并行上传（可配置并发）
+- [x] 返回 CDN URL
+
+### HTML 节点 ✅
+
+**Markdown → HTML 转换**:
+- [x] 调用 md-to-wxhtml 技能
+- [x] 降级方案（简单正则转换）
+- [x] 保存 article.html + article.md
+
+### Draftbox 节点 ✅
+
+**微信草稿箱发布**:
+- [x] 调用微信 API
+- [x] 支持多账号
+- [x] 返回草稿箱链接
+
 ---
 
 ## 当前使用方式
 
-### 交互式调研（推荐）
+### 交互式调研
 ```bash
 npm run research
 ```
 
-### 完整流程测试
+### 图片生成测试
 ```bash
-# 需要 RAG 索引就绪
+npm run test-interactive
+```
+
+### 完整流程（需要 RAG 索引）
+```bash
 npm run test-full
 ```
 
@@ -155,39 +205,41 @@ npm run build-indices     # 构建向量索引（待网络恢复）
 
 ## 下一步计划
 
-### 短期（P0）- 核心流程完善
+### P0 - 必须完成
 
 1. **RAG 索引构建** ⚠️ 阻塞
    - 当前问题：网络不稳定，无法下载嵌入模型
    - 备选方案：切换到 OpenAI Embedding API
-   - 预计时间：30分钟
+   - 影响：Titles 节点无法检索参考标题
 
-2. **Titles 节点** (`03_titles.node.ts`) ⚠️ 依赖标题索引
-   - 基于 Brief 推荐角度生成标题
-   - 使用高质量 LLM (Anthropic Opus)
-   - 输出 5-10 个候选标题
-   - 预计时间：1小时
+2. **完整流程端到端测试**
+   - 使用真实文章验证 15 节点全链路
+   - 调优各节点 Prompt
+   - 修复发现的 bug
 
-3. **完整流程测试**
-   - Research → RAG → Titles → Draft → Polish → Rewrite → Humanize
-   - 验证数据流完整性
-   - 调优 Prompt 质量
-   - 预计时间：1小时
+### P1 - 质量提升
 
-### 中期（P1）- 内容质量提升
+3. **Prompt 优化**
+   - 各节点 Prompt 迭代优化
+   - 基于真实案例调优
+   - A/B 测试不同版本
 
-4. **HTML 转换** (`12_html.node.ts`)
-   - Markdown → 富文本 HTML
-   - 保留 data-* 属性
-   - 支持微信编辑器格式
-   - 预计时间：1小时
+4. **错误处理增强**
+   - 各节点降级策略完善
+   - 用户友好的错误提示
+   - 重试机制优化
 
-### 长期（P2）- 发布与扩展
+### P2 - 体验优化
 
-5. **草稿箱发布**
-6. **图片生成集成**
-7. **多平台支持（小红书）**
-8. **完整 CLI 体验**
+5. **CLI 体验**
+   - 进度条显示
+   - 彩色输出优化
+   - 交互确认简化
+
+6. **性能优化**
+   - 并发控制调优
+   - 缓存机制
+   - 流式输出
 
 ---
 
@@ -199,10 +251,15 @@ npm run build-indices     # 构建向量索引（待网络恢复）
 - [x] Polish 节点实现
 - [x] Rewrite 节点实现
 - [x] Humanize 节点实现
+- [x] Titles 节点实现
+- [x] Images 流程（Prompts → 生成 → 上传）
+- [x] HTML 节点实现
+- [x] Draftbox 节点实现
+- [x] test-interactive 缺少 user message bug
+- [x] Images 节点水印问题
 
 ### 待解决
-- [ ] RAG 嵌入模型网络问题
-- [ ] Titles 节点未实现（依赖标题索引）
+- [ ] RAG 嵌入模型网络问题（可切换 OpenAI API）
 
 ---
 
@@ -213,41 +270,30 @@ write-agent/
 ├── src/
 │   ├── agents/article/
 │   │   ├── nodes/
-│   │   │   ├── 01_research.node.ts    ✅
-│   │   │   ├── 02_rag.node.ts         ✅
-│   │   │   ├── 03_titles.node.ts      ⏳ 待实现
-│   │   │   ├── 04_select_title.node.ts ✅
-│   │   │   ├── 05_draft.node.ts       ✅
-│   │   │   ├── 06_polish.node.ts      ✅
-│   │   │   ├── 07_rewrite.node.ts     ✅
-│   │   │   ├── 08_humanize.node.ts    ✅
+│   │   │   ├── 00_select_wechat.node.ts  ✅
+│   │   │   ├── 01_research.node.ts       ✅
+│   │   │   ├── 02_rag.node.ts            ✅
+│   │   │   ├── 03_titles.node.ts         ✅
+│   │   │   ├── 04_select_title.node.ts   ✅
+│   │   │   ├── 05_draft.node.ts          ✅
+│   │   │   ├── 06_polish.node.ts         ✅
+│   │   │   ├── 07_rewrite.node.ts        ✅
+│   │   │   ├── 08_humanize.node.ts       ✅
 │   │   │   ├── 09_confirm_images.node.ts ✅
-│   │   │   ├── 10_prompts.node.ts     ⏳ 待实现
-│   │   │   ├── 11_images.node.ts      ⏳ 待实现
-│   │   │   ├── 11.5_upload_images.node.ts ⏳ 待实现
-│   │   │   ├── 12_html.node.ts        ⏳ 待实现
-│   │   │   └── 13_draftbox.node.ts    ⏳ 待实现
-│   ├── rag/                           ✅
-│   │   ├── index/
-│   │   │   ├── index-manager.ts       ✅
-│   │   │   └── schema.ts              ✅
-│   │   └── utils/
-│   │       └── rag-formatter.ts       ✅
-│   ├── adapters/                      ✅
-│   │   ├── parallel-search.ts         ✅
-│   │   ├── firecrawl.ts               ✅
-│   │   └── mcp-webresearch.ts         ✅
-│   ├── cli/
-│   │   └── research-cli.ts            ✅
-│   ├── config/
-│   │   └── llm.yaml                   ✅
-│   └── utils/
-│       ├── brief-generator.ts         ✅
-│       └── llm-client.ts              ✅
-├── scripts/                            ✅
-├── data/                               ✅
+│   │   │   ├── 10_prompts.node.ts        ✅
+│   │   │   ├── 11_images.node.ts         ✅
+│   │   │   ├── 11.5_upload_images.node.ts ✅
+│   │   │   ├── 12_html.node.ts           ✅
+│   │   │   └── 13_draftbox.node.ts       ✅
+│   ├── rag/                              ✅
+│   ├── adapters/                         ✅
+│   ├── cli/                              ✅
+│   ├── config/                           ✅
+│   └── utils/                            ✅
+├── scripts/                              ✅
+├── data/                                 ✅
 └── docs/
-    └── ARCHITECTURE.md               ✅
+    └── ARCHITECTURE.md                   ✅
 ```
 
 ---
@@ -261,3 +307,4 @@ write-agent/
 - **RAG**: LlamaIndex.js + 本地嵌入模型
 - **向量存储**: SimpleVectorStore
 - **CLI**: Node.js readline
+- **生图**: 火山 Ark API (Doubao Seedream)

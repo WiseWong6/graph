@@ -128,57 +128,62 @@ models:
 
     # 起草节点：使用强模型进行内容创作
     draft:
-      provider: anthropic
-      model: claude-opus-4-5-20251101  # 最强模型
-      api_key_env: ANTHROPIC_API_KEY
+      provider: deepseek
+      model: deepseek-chat
+      base_url: https://api.deepseek.com/v1
+      api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 8192
         temperature: 0.8  # 提高创造性
 
     # 润色节点：使用中等模型进行内容优化
     polish:
-      provider: anthropic
-      model: claude-3-5-sonnet-20241022  # 平衡性能和成本
-      api_key_env: ANTHROPIC_API_KEY
+      provider: deepseek
+      model: deepseek-chat
+      base_url: https://api.deepseek.com/v1
+      api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 4096
         temperature: 0.5
 
     # 重写节点：使用最强模型进行智性叙事重写
     rewrite:
-      provider: anthropic
-      model: claude-opus-4-5-20251101  # 最强模型，需要高质量创作
-      api_key_env: ANTHROPIC_API_KEY
+      provider: deepseek
+      model: deepseek-chat
+      base_url: https://api.deepseek.com/v1
+      api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 8192
         temperature: 0.9  # 高创造性，激发跨界思考
 
     # 人化节点：去除 AI 味，增加活人感
     humanize:
-      provider: anthropic
-      model: claude-3-5-sonnet-20241022  # 平衡质量和成本
-      api_key_env: ANTHROPIC_API_KEY
+      provider: deepseek
+      model: deepseek-chat
+      base_url: https://api.deepseek.com/v1
+      api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 8192
         temperature: 0.8  # 较高温度，增加自然表达
 
     # 标题生成节点：使用经济型模型
     title_gen:
-      provider: anthropic
-      model: claude-3-5-haiku-20241022
-      api_key_env: ANTHROPIC_API_KEY
+      provider: deepseek
+      model: deepseek-chat
+      base_url: https://api.deepseek.com/v1
+      api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 1024
         temperature: 0.9  # 高创造性
 
     # 图片提示词生成节点
     image_prompt:
-      provider: openai
-      model: gpt-4o-mini
-      api_key_env: OPENAI_API_KEY
-      base_url: https://api.openai.com/v1
+      provider: deepseek
+      model: deepseek-chat
+      base_url: https://api.deepseek.com/v1
+      api_key_env: DEEPSEEK_API_KEY
       params:
-        max_tokens: 1024
+        max_tokens: 2048
         temperature: 0.7
 
     # 图片生成节点（如使用 DALL-E）
@@ -194,18 +199,20 @@ models:
 
     # HTML 转换节点：使用经济型模型
     html_convert:
-      provider: anthropic
-      model: claude-3-5-haiku-20241022
-      api_key_env: ANTHROPIC_API_KEY
+      provider: deepseek
+      model: deepseek-chat
+      base_url: https://api.deepseek.com/v1
+      api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 16384  # 长文档需要更多 token
         temperature: 0.1  # 几乎确定性，保持格式
 
     # 最终审核节点：使用最强模型确保质量
     review:
-      provider: anthropic
-      model: claude-opus-4-5-20251101
-      api_key_env: ANTHROPIC_API_KEY
+      provider: deepseek
+      model: deepseek-chat
+      base_url: https://api.deepseek.com/v1
+      api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 2048
         temperature: 0.3

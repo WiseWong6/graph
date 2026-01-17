@@ -129,7 +129,7 @@ class IndexManager {
         const data = JSON.parse(line);
         return {
           title: data.title,
-          source: data.source
+          source: data.source_file
         };
       });
 

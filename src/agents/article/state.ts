@@ -1,6 +1,18 @@
 import { Annotation } from "@langchain/langgraph";
 
 /**
+ * 图片风格类型
+ *
+ * 参考 image-prompter 技能的五种风格
+ */
+export type ImageStyle =
+  | "infographic"  // 扁平化科普图
+  | "healing"      // 治愈系插画
+  | "pixar"        // 粗线条插画
+  | "sokamono"     // 描边插画
+  | "handdrawn";   // 方格纸手绘
+
+/**
  * 图片配置类型
  *
  * 用于 Gate B (confirm_images) 交互节点
@@ -8,11 +20,9 @@ import { Annotation } from "@langchain/langgraph";
 export interface ImageConfig {
   confirmed: boolean;
   count: number;
-  orientation: "landscape" | "portrait";
-  poster_ratio: string;  // "16:9" or "3:4"
-  cover_ratio: string;   // "16:9" or "3:4"
-  model: string;         // "doubao-seedream-4-5-251128"
-  resolution: string;    // "2k"
+  style: ImageStyle;       // 五种风格之一
+  model: string;           // "doubao-seedream-4-5-251128"
+  resolution: string;      // "2k"
 }
 
 /**
