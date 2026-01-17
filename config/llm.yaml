@@ -1,0 +1,443 @@
+# =============================================================================
+# LLM 模型配置文件
+# =============================================================================
+# 用于配置不同节点使用的 LLM 模型、API 凭证和 Prompt 模板
+#
+# 配置层级：
+#   1. 全局默认配置 (models.default) - 所有节点的基础配置
+#   2. 节点特定配置 (models.nodes.*) - 覆盖默认配置
+#   3. Prompt 模板 (prompts.*) - 每个节点的提示词模板
+#
+# 继承规则：
+#   - 节点配置会继承 default 的所有字段
+#   - 节点只需指定需要覆盖的字段
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 全局凭证配置（可选）
+# -----------------------------------------------------------------------------
+# 如果多个 provider 使用相同的凭证，可以在这里统一配置
+# 也可以直接在每个 provider 下配置
+credentials:
+  # 环境变量前缀，实际值从环境变量读取
+  # 例如：ANTHROPIC_API_KEY、OPENAI_API_KEY
+  env_prefix: ""
+
+# -----------------------------------------------------------------------------
+# 模型配置
+# -----------------------------------------------------------------------------
+models:
+  # -------------------------------------------------------------------------
+  # 全局默认配置
+  # -------------------------------------------------------------------------
+  # 所有节点的默认配置，未指定的节点将使用这些设置
+  default:
+    # LLM Provider
+    # 可选值：
+    #   - anthropic: Claude 系列（Claude Opus, Sonnet, Haiku）
+    #   - openai: GPT 系列（GPT-4, GPT-3.5）
+    #   - azure_openai: Azure OpenAI 服务
+    #   - deepseek: DeepSeek 系列
+    #   - 自定义: 兼容 OpenAI API 的服务
+    provider: anthropic
+
+    # 模型名称
+    # 示例：
+    #   - Claude Opus 4.5: claude-opus-4-5-20251101
+    #   - Claude Sonnet 3.5: claude-3-5-sonnet-20241022
+    #   - GPT-4: gpt-4-turbo-preview
+    #   - GPT-3.5: gpt-3.5-turbo
+    model: claude-opus-4-5-20251101
+
+    # API Key 配置
+    # 支持两种方式：
+    #   1. 从环境变量读取：api_key_env: "ANTHROPIC_API_KEY"
+    #   2. 直接配置（不推荐）：api_key: "sk-..."
+    api_key_env: ANTHROPIC_API_KEY
+
+    # API Base URL
+    # 大多数情况下不需要修改，除非使用代理或自定义服务
+    # 示例：
+    #   - Anthropic: https://api.anthropic.com
+    #   - OpenAI: https://api.openai.com/v1
+    #   - 代理: http://localhost:8080
+    base_url: https://api.anthropic.com
+
+    # 请求参数配置
+    params:
+      # 最大生成 Token 数
+      # 不同模型有不同的上限：
+      #   - Claude Opus: 200,000
+      #   - Claude Sonnet: 200,000
+      #   - GPT-4: 128,000
+      max_tokens: 8192
+
+      # 温度参数（控制随机性）
+      # 范围：0.0 - 1.0
+      #   - 0.0: 完全确定性，适合代码生成
+      #   - 0.7: 平衡，适合大部分任务
+      #   - 1.0: 高随机性，适合创意任务
+      temperature: 0.7
+
+      # Top-P 采样（核采样）
+      # 范围：0.0 - 1.0，通常设置为 1.0
+      top_p: 1.0
+
+      # Top-K 采样
+      # 大多数模型不需要此参数
+      # top_k: 40
+
+    # 超时配置（秒）
+    timeout: 120
+
+    # 重试配置
+    retry:
+      # 最大重试次数
+      max_attempts: 3
+      # 重试延迟（秒）
+      delay: 1
+      # 指数退避倍数
+      backoff_multiplier: 2
+
+  # -------------------------------------------------------------------------
+  # 节点特定配置
+  # -------------------------------------------------------------------------
+  # 每个节点可以覆盖默认配置
+  # 节点名称对应工作流中的节点标识
+  # -------------------------------------------------------------------------
+  nodes:
+    # 基础节点：使用 DeepSeek
+    simple_llm:
+      provider: deepseek
+      model: deepseek-chat
+      base_url: https://api.deepseek.com/v1
+      api_key_env: DEEPSEEK_API_KEY
+      params:
+        max_tokens: 1024
+        temperature: 0.7
+
+    # 研究节点：使用经济型模型进行资料收集
+    research:
+      provider: deepseek
+      model: deepseek-chat
+      base_url: https://api.deepseek.com/v1
+      api_key_env: DEEPSEEK_API_KEY
+      params:
+        max_tokens: 8192  # 增加以确保完整 JSON 输出
+        temperature: 0.3  # 降低随机性，确保准确性
+
+    # 起草节点：使用强模型进行内容创作
+    draft:
+      provider: anthropic
+      model: claude-opus-4-5-20251101  # 最强模型
+      api_key_env: ANTHROPIC_API_KEY
+      params:
+        max_tokens: 8192
+        temperature: 0.8  # 提高创造性
+
+    # 润色节点：使用中等模型进行内容优化
+    polish:
+      provider: anthropic
+      model: claude-3-5-sonnet-20241022  # 平衡性能和成本
+      api_key_env: ANTHROPIC_API_KEY
+      params:
+        max_tokens: 4096
+        temperature: 0.5
+
+    # 重写节点：使用最强模型进行智性叙事重写
+    rewrite:
+      provider: anthropic
+      model: claude-opus-4-5-20251101  # 最强模型，需要高质量创作
+      api_key_env: ANTHROPIC_API_KEY
+      params:
+        max_tokens: 8192
+        temperature: 0.9  # 高创造性，激发跨界思考
+
+    # 人化节点：去除 AI 味，增加活人感
+    humanize:
+      provider: anthropic
+      model: claude-3-5-sonnet-20241022  # 平衡质量和成本
+      api_key_env: ANTHROPIC_API_KEY
+      params:
+        max_tokens: 8192
+        temperature: 0.8  # 较高温度，增加自然表达
+
+    # 标题生成节点：使用经济型模型
+    title_gen:
+      provider: anthropic
+      model: claude-3-5-haiku-20241022
+      api_key_env: ANTHROPIC_API_KEY
+      params:
+        max_tokens: 1024
+        temperature: 0.9  # 高创造性
+
+    # 图片提示词生成节点
+    image_prompt:
+      provider: openai
+      model: gpt-4o-mini
+      api_key_env: OPENAI_API_KEY
+      base_url: https://api.openai.com/v1
+      params:
+        max_tokens: 1024
+        temperature: 0.7
+
+    # 图片生成节点（如使用 DALL-E）
+    image_gen:
+      provider: openai
+      model: dall-e-3
+      api_key_env: OPENAI_API_KEY
+      base_url: https://api.openai.com/v1
+      params:
+        size: "1024x1792"  # DALL-E 特定参数
+        quality: "standard"
+        style: "vivid"
+
+    # HTML 转换节点：使用经济型模型
+    html_convert:
+      provider: anthropic
+      model: claude-3-5-haiku-20241022
+      api_key_env: ANTHROPIC_API_KEY
+      params:
+        max_tokens: 16384  # 长文档需要更多 token
+        temperature: 0.1  # 几乎确定性，保持格式
+
+    # 最终审核节点：使用最强模型确保质量
+    review:
+      provider: anthropic
+      model: claude-opus-4-5-20251101
+      api_key_env: ANTHROPIC_API_KEY
+      params:
+        max_tokens: 2048
+        temperature: 0.3
+
+    # 新增：测试节点 2（使用快速模型）
+    simple_llm_2:
+      provider: deepseek
+      model: deepseek-chat
+      base_url: https://api.deepseek.com/v1
+      api_key_env: DEEPSEEK_API_KEY
+      params:
+        max_tokens: 300
+        temperature: 0.3
+
+    # 新增：测试节点 3（使用创意模型）
+    simple_llm_3:
+      provider: deepseek
+      model: deepseek-chat
+      base_url: https://api.deepseek.com/v1
+      api_key_env: DEEPSEEK_API_KEY
+      params:
+        max_tokens: 500
+        temperature: 0.9
+
+# -----------------------------------------------------------------------------
+# Prompt 模板
+# -----------------------------------------------------------------------------
+# 每个节点的提示词模板
+# 支持多行文本和变量插值
+# -----------------------------------------------------------------------------
+prompts:
+  # 研究节点 Prompt
+  research: |
+    你是一个专业的研究助理。请根据以下主题进行深度调研：
+
+    主题：{topic}
+
+    要求：
+    1. 收集最新的行业趋势和数据
+    2. 分析竞品内容，找出差异化机会
+    3. 提供具体的数据支撑和案例
+    4. 输出结构化的调研报告
+
+    调研深度：{depth}
+    时效性要求：{recency}
+
+  # 起草节点 Prompt
+  draft: |
+    你是一个专业的内容创作者。请根据以下调研报告撰写文章：
+
+    调研报告：
+    {research_report}
+
+    要求：
+    1. 使用 {style} 风格
+    2. 目标受众：{audience}
+    3. 文章长度：{length} 字
+    4. 标题方案：提供 {num_titles} 个备选标题
+
+    输出格式：
+    - 标题方案
+    - 正文内容（Markdown 格式）
+    - 关键词提取
+
+  # 润色节点 Prompt
+  polish: |
+    你是一个专业的内容编辑。请润色以下文章：
+
+    原文：
+    {draft_content}
+
+    润色要求：
+    1. {polish_type}（深度润色/轻度润色/风格转换）
+    2. 保持原有观点和信息
+    3. 提升表达流畅度和可读性
+    4. 优化段落结构和逻辑
+
+    输出格式：
+    - 润色后的文章（Markdown）
+    - 修改说明
+
+  # 重写节点 Prompt（智性叙事）
+  rewrite: |
+    你是一个**跨界智性叙事者**，擅长用人文视角解构复杂技术。
+
+    请使用**智性四步法**重写以下文章：
+    1. 打破认知：指出看似合理但低效的现状
+    2. 通俗解构：用生活化比喻贯穿全文
+    3. 跨界升维：引用跨学科案例（文学/生物/历史/心理学/经济学）
+    4. 思维留白：总结思维模型，金句收尾
+
+    质量要求（IPS 原则）：
+    - I (Intellectual): 反直觉洞察，提供智力愉悦感
+    - P (Polymath): 至少一个跨学科引用
+    - S (Simple): 核心比喻足够简单，中学生能懂
+
+    格式约束：
+    - 禁止：列表符号、"首先/其次"、机械分点
+    - 字数：1500-2000 字
+    - 短段落保持呼吸感
+    - 关键洞察和金句用 **加粗** 标注
+
+    待重写的文章：
+    {polished_content}
+
+    核心洞察：
+    {key_insights}
+
+    推荐角度：
+    {recommended_angle}
+
+  # 人化节点 Prompt（去机械化）
+  humanize: |
+    请对以下文章进行"去机械化"处理，同时完成格式清洗和风格重写。
+
+    ## 阶段一：格式清洗
+    - 去除中英文之间多余空格
+    - 标点符号规范化（中文全角，英文半角）
+    - 去除不必要的引号
+
+    ## 阶段二：风格重写
+    - 删除"首先/其次/综上所述"等机械连接词
+    - 避免"随着...的发展"等模板开头
+    - 段落自然过渡，禁止列表分点
+    - 适度使用口语化表达："说实话/有意思的是"
+
+    ## 保护内容
+    - 代码块、链接、图片完全保留
+    - 核心观点保持原意，只改表达
+
+    待处理的文章：
+    {content}
+
+  # 标题生成节点 Prompt
+  title_gen: |
+    请为以下文章生成 {num_titles} 个高吸引力的标题：
+
+    文章摘要：
+    {article_summary}
+
+    标题要求：
+    1. 使用 {title_style} 风格
+    2. 长度控制在 {max_length} 字以内
+    3. 包含核心关键词
+    4. 具有点击吸引力
+
+    输出格式：
+    - 标题列表（每行一个）
+    - 每个标题的简要说明
+
+  # 图片提示词生成节点 Prompt
+  image_prompt: |
+    请根据以下文章内容生成配图提示词：
+
+    文章内容：
+    {article_content}
+
+    配图要求：
+    1. 风格：{image_style}
+    2. 数量：{num_images}
+    3. 尺寸比例：{aspect_ratio}
+    4. 情感基调：{mood}
+
+    输出格式：
+    - 图片序号
+    - 详细提示词（英文）
+    - 对应文章段落
+
+  # HTML 转换节点 Prompt
+  html_convert: |
+    请将以下 Markdown 文章转换为微信公众号编辑器兼容的 HTML：
+
+    Markdown 内容：
+    {markdown_content}
+
+    转换要求：
+    1. 保留所有 data-* 属性
+    2. 保持原始 HTML 片段不变
+    3. 添加合适的样式类
+    4. 确保在微信编辑器中正确显示
+
+    输出格式：
+    - HTML 代码
+    - 样式说明
+
+  # 最终审核节点 Prompt
+  review: |
+    请审核以下文章是否符合发布标准：
+
+    文章内容：
+    {final_content}
+
+    审核维度：
+    1. 内容准确性
+    2. 语言表达
+    3. 结构逻辑
+    4. SEO 友好性
+    5. 法律合规性
+
+    输出格式：
+    - 审核结果：通过/不通过
+    - 问题列表（如有）
+    - 改进建议（如有）
+
+# -----------------------------------------------------------------------------
+# 配置别名和锚点（高级用法）
+# -----------------------------------------------------------------------------
+# 使用 YAML 锚点和别名来复用配置
+#
+# 示例：
+#   _anthropic_credentials: &anthropic_creds
+#     api_key_env: ANTHROPIC_API_KEY
+#     base_url: https://api.anthropic.com
+#
+#   nodes:
+#     research:
+#       <<: *anthropic_creds
+#       model: claude-3-5-haiku-20241022
+#     draft:
+#       <<: *anthropic_creds
+#       model: claude-opus-4-5-20251101
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# 环境变量说明
+# -----------------------------------------------------------------------------
+# 需要在运行环境设置以下环境变量：
+#
+# export ANTHROPIC_API_KEY="sk-ant-..."
+# export OPENAI_API_KEY="sk-..."
+# export AZURE_OPENAI_API_KEY="..."
+# export DEEPSEEK_API_KEY="..."
+#
+# 推荐使用 .env 文件或系统环境变量管理
+# -----------------------------------------------------------------------------

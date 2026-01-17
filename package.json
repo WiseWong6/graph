@@ -1,0 +1,81 @@
+{
+  "name": "write-agent",
+  "version": "0.1.0",
+  "description": "A LangGraph-based multi-agent writing system with MCP adapters",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "write-agent": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "dev": "tsx watch src/cli/index.ts",
+    "build": "tsc",
+    "start": "node dist/cli/index.js",
+    "hello-world": "tsx src/hello-world/graph.ts",
+    "hello-world:build": "node dist/hello-world/graph.js",
+    "agent": "tsx src/cli/index.ts agent",
+    "full": "tsx src/cli/index.ts full",
+    "research": "tsx src/cli/research-cli.ts",
+    "test-research": "tsx src/agents/article/nodes/test-research.ts",
+    "test-search": "tsx src/agents/article/nodes/test-research.ts search",
+    "test-search-mcp": "tsx src/agents/article/nodes/test-search.ts",
+    "parse-articles": "tsx scripts/parse-articles.ts",
+    "build-indices": "tsx scripts/build-indices.ts",
+    "test-retrieval": "tsx scripts/test-retrieval.ts",
+    "test": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "vitest run tests/e2e",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "langgraph",
+    "agent",
+    "writing",
+    "mcp",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@langchain/core": "^1.0.1",
+    "@langchain/langgraph": "^1.0.7",
+    "@langchain/langgraph-checkpoint-sqlite": "^1.0.0",
+    "@langchain/openai": "^0.6.17",
+    "@llamaindex/bm25-retriever": "^0.0.11",
+    "@llamaindex/huggingface": "^0.1.32",
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@mozilla/readability": "^0.5.0",
+    "axios": "^1.7.9",
+    "chalk": "^5.4.1",
+    "cheerio": "^1.0.0",
+    "commander": "^13.1.0",
+    "dotenv": "^17.2.3",
+    "inquirer": "^12.4.1",
+    "js-yaml": "^4.1.0",
+    "llamaindex": "^0.12.1",
+    "openai": "^6.16.0",
+    "ora": "^8.1.1",
+    "playwright": "^1.49.1",
+    "uuid": "^11.0.5",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/inquirer": "^9.0.7",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.12.7",
+    "@types/uuid": "^10.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.19.1",
+    "@typescript-eslint/parser": "^8.19.1",
+    "eslint": "^9.18.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

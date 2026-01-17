@@ -1,0 +1,391 @@
+# =============================================================================
+# 输出配置文件
+# =============================================================================
+# 用于配置文章生成工作流的输出目录结构、文件命名规则和 Checkpoint 设置
+#
+# 核心概念：
+#   - base_dir: 所有输出的根目录
+#   - structure: 不同类型文件的子目录结构
+#   - naming: 文件和目录的命名规则
+#   - checkpoint: 中间结果的保存策略
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 输出目录配置
+# -----------------------------------------------------------------------------
+output:
+  # 输出根目录（相对路径或绝对路径）
+  # 相对路径相对于项目根目录
+  # 支持 ~ 展开（用户主目录）
+  base_dir: "./output"
+
+  # 目录结构配置
+  # 定义不同类型文件的存储位置
+  structure:
+    # 调研资料输出目录
+    # 存放：调研报告、竞品分析、数据收集等
+    research: "research/"
+
+    # 文章草稿输出目录
+    # 存放：初稿、各版本草稿、润色版本等
+    drafts: "drafts/"
+
+    # 配图输出目录
+    # 存放：生成的图片、图片提示词等
+    images: "images/"
+
+    # 最终版本输出目录
+    # 存放：最终发布的文章、HTML 版本等
+    final: "final/"
+
+    # 日志输出目录
+    # 存放：运行日志、错误日志、调试信息等
+    # 以 _ 开头表示内部目录，不会被当作内容目录
+    logs: "_logs/"
+
+    # Checkpoint 输出目录
+    # 存放：中间状态、快照等
+    checkpoints: "_checkpoints/"
+
+    # 临时文件目录
+    # 存放：临时缓存、中间结果等
+    # 定期清理
+    temp: "_temp/"
+
+  # 目录创建策略
+  # - auto: 自动创建所有需要的目录
+  # - manual: 手动创建，报错如果目录不存在
+  # - strict: 严格模式，只创建必需的目录
+  creation_policy: "auto"
+
+# -----------------------------------------------------------------------------
+# 文件命名规则
+# -----------------------------------------------------------------------------
+naming:
+  # 运行 ID 格式
+  # 每次运行都有唯一的 ID，用于组织输出
+  # 支持的变量：
+  #   - {timestamp}: Unix 时间戳
+  #   - {datetime}: 格式化的日期时间
+  #   - {uuid}: UUID v4
+  #   - {sequence}: 递增序列号
+  run_id_format: "article-{datetime}"
+
+  # 日期时间格式
+  # 使用 Python strftime 格式
+  # 常用格式：
+  #   - %Y%m%d_%H%M%S: 20250117_143022
+  #   - %Y-%m-%d: 2025-01-17
+  #   - %Y%m%d: 20250117
+  date_format: "%Y%m%d_%H%M%S"
+
+  # 文件命名模板
+  files:
+    # 调研报告文件名
+    research: "research-{run_id}.md"
+
+    # 草稿文件名
+    # 支持版本号：{version}
+    draft: "draft-v{version}-{run_id}.md"
+
+    # 润色版本文件名
+    polished: "polished-v{version}-{run_id}.md"
+
+    # 标题方案文件名
+    titles: "titles-{run_id}.md"
+
+    # 图片文件名
+    # 支持序号：{index}
+    image: "image-{index}-{run_id}.png"
+
+    # 图片提示词文件名
+    image_prompt: "image-prompt-{index}-{run_id}.txt"
+
+    # HTML 版本文件名
+    html: "article-{run_id}.html"
+
+    # 最终版本文件名
+    final: "final-{run_id}.md"
+
+    # 日志文件名
+    log: "run-{run_id}.log"
+
+    # Checkpoint 文件名
+    checkpoint: "checkpoint-{node_name}-{run_id}.json"
+
+  # 目录命名模板
+  directories:
+    # 按日期组织的目录
+    daily: "articles-{date}"
+
+    # 按运行 ID 组织的目录
+    by_run: "run-{run_id}"
+
+    # 按文章类型组织的目录
+    by_type: "{type}/articles"
+
+# -----------------------------------------------------------------------------
+# 输出结构模式
+# -----------------------------------------------------------------------------
+# 定义两种主要的输出组织方式
+# -----------------------------------------------------------------------------
+layout:
+  # 布局模式
+  # - flat: 所有文件放在对应的 type 目录下
+  # - hierarchical: 每次运行创建独立的子目录
+  # - hybrid: 混合模式（推荐）
+  mode: "hybrid"
+
+  # hierarchical 模式配置
+  hierarchical:
+    # 运行目录名模板
+    run_dir: "{run_id}"
+
+    # 结构示例：
+    # output/
+    #   ├── article-20250117_143022/
+    #   │   ├── research/
+    #   │   │   └── research.md
+    #   │   ├── drafts/
+    #   │   │   ├── draft-v1.md
+    #   │   │   └── polished-v1.md
+    #   │   ├── images/
+    #   │   │   ├── image-1.png
+    #   │   │   └── image-1-prompt.txt
+    #   │   └── final/
+    #   │       ├── article.md
+    #   │       └── article.html
+    #   ├── article-20250117_150330/
+    #   │   └── ...
+    #   └── _logs/
+    #       ├── run-article-20250117_143022.log
+    #       └── run-article-20250117_150330.log
+
+  # hybrid 模式配置（推荐）
+  hybrid:
+    # 内容文件按运行分组
+    content_mode: "hierarchical"
+
+    # 日志文件集中管理
+    log_mode: "centralized"
+
+    # 结构示例：
+    # output/
+    #   ├── content/
+    #   │   ├── article-20250117_143022/
+    #   │   │   ├── research.md
+    #   │   │   ├── draft-v1.md
+    #   │   │   ├── image-1.png
+    #   │   │   └── final.md
+    #   │   └── article-20250117_150330/
+    #   │       └── ...
+    #   └── _logs/
+    #       ├── 2025-01-17/
+    #       │   ├── run-143022.log
+    #       │   └── run-150330.log
+    #       └── 2025-01-18/
+    #           └── ...
+
+# -----------------------------------------------------------------------------
+# Checkpoint 配置
+# -----------------------------------------------------------------------------
+checkpoint:
+  # 是否启用 Checkpoint
+  # 启用后每个节点执行完会保存状态，支持断点续传
+  enabled: true
+
+  # Checkpoint 保存位置
+  dir: "./src/checkpoints"
+
+  # 保存策略
+  # - every_node: 每个节点执行完都保存
+  # - on_success: 只在节点成功时保存
+  # - on_failure: 只在节点失败时保存
+  # - end_only: 只在最后保存
+  save_strategy: "every_node"
+
+  # 保留策略
+  # - all: 保留所有 checkpoint
+  # - latest_only: 只保留最新的
+  # - keep_n: 保留最近 N 个
+  # - by_date: 保留指定日期内的
+  retention:
+    policy: "keep_n"
+    value: 10  # 保留最近 10 个
+
+  # 压缩配置
+  # 大型 checkpoint 可以压缩以节省空间
+  compression:
+    enabled: false
+    format: "gzip"  # gzip, bz2, lzma
+    threshold: 1048576  # 大于 1MB 才压缩
+
+# -----------------------------------------------------------------------------
+# 日志配置
+# -----------------------------------------------------------------------------
+logging:
+  # 日志级别
+  # - DEBUG: 详细调试信息
+  # - INFO: 一般信息
+  # - WARNING: 警告
+  # - ERROR: 错误
+  # - CRITICAL: 严重错误
+  level: "INFO"
+
+  # 日志格式
+  # - text: 纯文本格式
+  # - json: JSON 格式（便于解析）
+  # - detailed: 详细格式（包含时间、线程、模块等）
+  format: "detailed"
+
+  # 控制台输出
+  console:
+    enabled: true
+    # 是否带颜色
+    colored: true
+    # 最低输出级别
+    level: "INFO"
+
+  # 文件输出
+  file:
+    enabled: true
+    # 文件大小限制（字节）
+    # 0 表示不限制
+    max_size: 10485760  # 10MB
+    # 保留文件数
+    backup_count: 5
+    # 是否追加
+    append: true
+
+# -----------------------------------------------------------------------------
+# 清理策略
+# -----------------------------------------------------------------------------
+cleanup:
+  # 是否启用自动清理
+  enabled: true
+
+  # 清理时机
+  # - on_start: 运行开始时清理
+  # - on_end: 运行结束时清理
+  # - scheduled: 定时清理
+  # - manual: 手动清理
+  trigger: "on_start"
+
+  # 清理规则
+  rules:
+    # 临时文件：立即删除
+    temp:
+      age: "0s"  # 0 秒，立即删除
+      pattern: "*"
+
+    # 日志文件：保留 30 天
+    logs:
+      age: "30d"
+      pattern: "*.log"
+
+    # Checkpoint：保留最近 10 个
+    checkpoints:
+      policy: "keep_n"
+      value: 10
+
+    # 输出文件：保留 90 天
+    outputs:
+      age: "90d"
+      # 排除规则
+      exclude: ["final/*", "important/*"]
+
+  # 清理前确认
+  # 生产环境建议设为 false
+  confirm_before_cleanup: false
+
+# -----------------------------------------------------------------------------
+# 内容保留策略
+# -----------------------------------------------------------------------------
+retention:
+  # 最终版本保留策略
+  final:
+    # - all: 保留所有
+    # - by_date: 按日期保留
+    # - by_count: 按数量保留
+    policy: "all"
+
+  # 中间产物保留策略
+  intermediate:
+    # 草稿保留数量
+    drafts: 5
+
+    # 图片保留策略
+    images: "all"  # 或 "used_only"（只保留最终使用的）
+
+    # 调研资料保留策略
+    research: "latest"  # 或 "all"
+
+# -----------------------------------------------------------------------------
+# 导出配置
+# -----------------------------------------------------------------------------
+export:
+  # 支持的导出格式
+  formats:
+    # Markdown 导出
+    markdown:
+      enabled: true
+      extension: ".md"
+
+    # HTML 导出
+    html:
+      enabled: true
+      extension: ".html"
+      # 是否包含样式
+      include_styles: true
+      # 是否内联图片
+      inline_images: false
+
+    # PDF 导出（需要额外依赖）
+    pdf:
+      enabled: false
+      extension: ".pdf"
+      # 页面设置
+      page_size: "A4"
+      margin: "2cm"
+
+    # DOCX 导出（需要额外依赖）
+    docx:
+      enabled: false
+      extension: ".docx"
+
+  # 导出目标位置
+  # 如果为空，使用默认输出目录
+  destinations:
+    markdown: "./output/final"
+    html: "./output/final"
+    pdf: "./output/exports"
+    docx: "./output/exports"
+
+# -----------------------------------------------------------------------------
+# 变量说明
+# -----------------------------------------------------------------------------
+# 可用的命名变量：
+#
+# 时间相关：
+#   - {timestamp}: Unix 时间戳（1737117022）
+#   - {datetime}: 格式化的日期时间（20250117_143022）
+#   - {date}: 日期（20250117）
+#   - {time}: 时间（143022）
+#   - {year}: 年份（2025）
+#   - {month}: 月份（01）
+#   - {day}: 日期（17）
+#   - {hour}: 小时（14）
+#   - {minute}: 分钟（30）
+#   - {second}: 秒（22）
+#
+# 运行相关：
+#   - {run_id}: 运行 ID（如 article-20250117_143022）
+#   - {sequence}: 递增序列号
+#   - {uuid}: UUID v4
+#
+# 内容相关：
+#   - {version}: 版本号
+#   - {index}: 序号
+#   - {type}: 类型
+#   - {node_name}: 节点名称
+# -----------------------------------------------------------------------------

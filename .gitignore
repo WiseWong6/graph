@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Output directory
+output/
+
+# Data files (keep structure, ignore heavy content)
+data/*.xlsx
+data/*.jsonl
+data/index/
+
+# Index files
+.index/
+
+# Checkpoints
+src/checkpoints/
+
+# Local models (too large for git)
+local_models/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp
+._temp.md
+
+# OS
+Thumbs.db
+.DS_Store
