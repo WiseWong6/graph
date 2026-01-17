@@ -1,5 +1,5 @@
 /**
- * Rewrite 节点
+ * Rewrite 节点 v2 - 使用统一错误处理和日志
  *
  * 职责: 使用智性叙事风格重写润色后的文章
  *
@@ -25,8 +25,13 @@ import { getNodeLLMConfig } from "../../../config/llm.js";
 import { LLMClient } from "../../../utils/llm-client.js";
 import { config } from "dotenv";
 import { resolve } from "path";
+import { createLogger } from "../../../utils/logger.js";
+import { ErrorHandler, ValidationError, retry } from "../../../utils/errors.js";
 
 config({ path: resolve(process.cwd(), ".env") });
+
+// 创建节点日志
+const log = createLogger("07_rewrite");
 
 // ========== 类型定义 ==========
 
@@ -59,52 +64,62 @@ interface RewriteRAG {
  * @returns 更新的状态
  */
 export async function rewriteNode(state: ArticleState): Promise<Partial<ArticleState>> {
-  console.log("[07_rewrite] Rewriting with intellectual narrative style...");
+  const timer = log.timer("rewrite");
+  log.startStep("validate_input");
 
+  // ========== 验证输入 ==========
   if (!state.polished) {
-    console.error("[07_rewrite] No polished content to rewrite");
-    throw new Error("Polished content not found in state");
+    throw new ValidationError("Polished content not found in state", "polished");
   }
 
   // ========== 获取标题 ==========
-  const title = state.decisions?.selectedTitle || state.titles?.[0] || state.topic || "无标题";
+  const title = state.decisions?.selectedTitle || state.titles?.[0] || "无标题";
+  log.completeStep("validate_input", { title, inputLength: state.polished.length });
 
   // ========== 解析 Brief 和 RAG ==========
+  log.startStep("parse_input");
   const brief = parseBriefForRewrite(state.researchResult || "");
   const rag = parseRAGForRewrite(state.ragContent || "");
 
-  console.log("[07_rewrite] Parsed Brief:", {
+  log.completeStep("parse_input", {
     topic: brief.topic,
     insightsCount: brief.keyInsights.length,
-    hasAngle: !!brief.recommendedAngle
-  });
-
-  console.log("[07_rewrite] Parsed RAG:", {
+    hasAngle: !!brief.recommendedAngle,
     quotesCount: rag.quotes.length,
-    hasContent: rag.hasContent
+    hasRAG: rag.hasContent
   });
 
   // ========== 构建 Prompt ==========
+  log.startStep("build_prompt");
   const prompt = buildRewritePrompt(title, brief, rag, state.polished);
+  log.completeStep("build_prompt", { promptLength: prompt.length });
 
   // ========== 调用 LLM ==========
+  log.startStep("llm_call");
   const llmConfig = getNodeLLMConfig("rewrite");
   const client = new LLMClient(llmConfig);
 
-  console.log("[07_rewrite] Calling LLM with config:", llmConfig.model);
+  log.info("LLM config:", { model: llmConfig.model, temperature: llmConfig.temperature });
 
   try {
-    const response = await client.call({
-      prompt,
-      systemMessage: REWRITE_SYSTEM_MESSAGE
-    });
+    // 使用重试机制调用 LLM
+    const response = await retry(
+      () => client.call({
+        prompt,
+        systemMessage: REWRITE_SYSTEM_MESSAGE
+      }),
+      { maxAttempts: 3, delay: 1000 }
+    )();
 
-    console.log("[07_rewrite] Rewrite completed, length:", response.text.length);
-    console.log("[07_rewrite] Usage:", response.usage);
+    log.completeStep("llm_call", {
+      outputLength: response.text.length,
+      usage: response.usage
+    });
 
     const rewritten = response.text;
 
     // ========== 保存 Rewrite 稿 ==========
+    log.startStep("save_output");
     const outputPath = state.outputPath || getDefaultOutputPath();
     const rewriteDir = join(outputPath, "rewrite");
 
@@ -114,15 +129,20 @@ export async function rewriteNode(state: ArticleState): Promise<Partial<ArticleS
 
     const rewritePath = join(rewriteDir, "07_rewrite.md");
     writeFileSync(rewritePath, rewritten, "utf-8");
-    console.log("[07_rewrite] Saved rewrite:", rewritePath);
+
+    log.completeStep("save_output", { path: rewritePath });
+    log.success(`Complete in ${timer.log()}`);
 
     return {
       rewritten,
       outputPath
     };
   } catch (error) {
-    console.error(`[07_rewrite] Failed to rewrite: ${error}`);
+    log.failStep("llm_call", error);
+    ErrorHandler.handle(error, "07_rewrite");
+
     // 降级: 返回润色稿
+    log.warn("Fallback to polished content");
     return {
       rewritten: state.polished
     };
@@ -133,11 +153,6 @@ export async function rewriteNode(state: ArticleState): Promise<Partial<ArticleS
 
 /**
  * 解析 Brief 提取核心洞察（用于 Rewrite）
- *
- * Rewrite 需要的是：
- * - 核心洞察（用于打破认知）
- * - 推荐角度（用于构建叙事框架）
- * - 主题（用于跨界引用搜索）
  */
 function parseBriefForRewrite(brief: string): RewriteBrief {
   const result: RewriteBrief = {
@@ -183,8 +198,6 @@ function parseBriefForRewrite(brief: string): RewriteBrief {
 
 /**
  * 解析 RAG 提取金句（用于 Rewrite 点缀）
- *
- * Rewrite 只需要金句，不需要完整文章片段
  */
 function parseRAGForRewrite(rag: string): RewriteRAG {
   const result: RewriteRAG = {
@@ -287,13 +300,11 @@ function buildRewritePrompt(title: string, brief: RewriteBrief, rag: RewriteRAG,
   lines.push("### 第一步：打破认知");
   lines.push("- 指出一种看似合理但低效的现状");
   lines.push("- 或揭示一个违反直觉的现象");
-  lines.push("- 用「聪明人在做傻事」的方式吸引注意");
   lines.push("");
 
   lines.push("### 第二步：通俗解构");
   lines.push("- 用一个**生活化的核心比喻**贯穿全文");
   lines.push("- 将复杂概念映射到这个场景中");
-  lines.push("- 拒绝黑话，术语紧跟比喻");
   lines.push("");
 
   lines.push("### 第三步：跨界升维");
@@ -311,8 +322,8 @@ function buildRewritePrompt(title: string, brief: RewriteBrief, rag: RewriteRAG,
   lines.push("---\n");
   lines.push("## 质量要求：IPS 原则\n");
   lines.push("- **I (Intellectual)**: 反直觉洞察，提供智力愉悦感");
-  lines.push("- **P (Polymath)**: 至少一个跨学科引用（历史/文学/生物等）");
-  lines.push("- **S (Simple)**: 核心比喻足够简单，中学生能懂");
+  lines.push("- **P (Polymath)**: **是否成功引用了至少一个\"跨学科\"的案例（历史/文学/生物等）？**");
+  lines.push("- **S (Simple)**: 核心比喻是否足够简单？是否连中学生都能看懂？");
   lines.push("");
 
   lines.push("## HKR 自检");
@@ -323,7 +334,7 @@ function buildRewritePrompt(title: string, brief: RewriteBrief, rag: RewriteRAG,
 
   // ========== 格式约束 ==========
   lines.push("## 格式约束");
-  lines.push("- **禁止**：列表符号、\"首先/其次/综上所述\"、机械分点");
+  lines.push("- **禁止**：列表符号、\"首先/其次\"、机械分点");
   lines.push("- **字数**：1500-2000 字");
   lines.push("- **段落**：短段落保持呼吸感");
   lines.push("- **加粗**：关键洞察和金句用 **加粗** 标注");
@@ -340,65 +351,48 @@ function buildRewritePrompt(title: string, brief: RewriteBrief, rag: RewriteRAG,
 /**
  * System Message - 跨界智性叙事者
  */
-const REWRITE_SYSTEM_MESSAGE = `# Role: 跨界智性叙事者 (Interdisciplinary & Intellectual Storyteller)
+const REWRITE_SYSTEM_MESSAGE = `你是一个**跨界智性叙事者**，擅长用人文视角解构复杂技术。
 
 ## 核心定位
 你是一个**擅长用人文视角解构复杂技术的通识专家**。你认为技术不是冰冷的数学，它是哲学、生物学和文学在硅基世界的投影。
-你的目标不是单纯地"把事情讲清楚"，而是**构建一座认知桥梁**，连接陌生概念与读者的已知经验，并提供一种"**智性愉悦感**"（Intellectual Delight）。
+你的目标不是单纯地"把事情讲清楚"，而是**构建一座认知桥梁**，连接陌生概念与读者的已知经验，并提供一种"**智性愉悦感**"。
 
 **你的读者画像**：**求知欲强、喜欢跨界思考的聪明人**。
-- 他们不满足于知道"它是什么"，更想知道"它像什么"以及"它在人类知识图谱中的位置"。
-- 相比于煽情的鸡汤，他们更渴望逻辑闭环带来的"Aha Moment"（顿悟时刻）。
 
-## 核心心法
+## 核心心法 (The Core Philosophy)
 
 ### 1. 认知桥梁 (Cognitive Bridge)
-- **极致比喻**：必须找到一个生活化的核心比喻贯穿全文。拒绝抽象名词堆砌，**用物理世界的逻辑解释数字世界的现象**。
-- **思想实验**：邀请读者参与思维游戏（例如："想象你正在..."、"如果规则变成..."）。
+- **极致比喻 (Master Analogy)**：必须找到一个生活化的核心比喻贯穿全文。拒绝抽象名词堆砌，**用物理世界的逻辑解释数字世界的现象**。
 
 ### 2. 跨学科共振 (The Polymath Approach)
 - **知识通感**：**这是你最核心的必杀技。** 在解释科技/商业现象时，必须引入至少一个**"非本领域"**的概念来佐证。
     - *可以是文学（如博尔赫斯）、生物学（如神经元）、历史（如工业革命）、心理学（如米勒定律）或经济学。*
-- **底层同构**：揭示看似不相关的领域背后，遵循着同一个底层逻辑。
 
 ### 3. 智性共鸣 (Intellectual Resonance)
 - **从"情绪"到"洞察"**：将"情绪"升级为**"反直觉洞察"**。
-    - *Old:* "他感到很痛苦。"
-    - *New:* "他以为自己在计算，其实是在浪费算力。真正的智能是知道何时停止计算。"
-- **思维模型**：不仅要给结论，还要给思维模型。让读者觉得"我不只懂了这个新闻，我还学到了一种思维方式"。
 
-## 写作结构：智性四步法
+## 写作结构：智性四步法 (The Intellectual Flow)
 
-**重要原则**：逻辑严密，但叙述如散文般流畅。自然过渡，无痕连接。
+### 第一步：打破认知 (The Counter-Intuitive Hook)
+* **目标**：指出一种看似合理但低效的现状，或揭示一个违反直觉的现象。
 
-### 第一步：打破认知
-指出一种看似合理但低效的现状，或揭示一个违反直觉的现象。
+### 第二步：通俗解构 (The Extended Metaphor)
+* **目标**：用**核心比喻**接管读者的认知。
+* **执行手段**：建立通俗场景，将复杂流程一一映射到这个场景中。
 
-### 第二步：通俗解构
-用**核心比喻**接管读者的认知。建立一个通俗场景，将复杂流程一一映射到这个场景中。
+### 第三步：跨界升维 (The Cross-Domain Lift)
+* **目标**：这是文章的**灵魂高光时刻**。
+* **执行手段**：引用一位文学家、哲学家或科学家的经典理论/故事。
 
-### 第三步：跨界升维
-这是文章的**灵魂高光时刻**。引用一位文学家、哲学家或科学家的经典理论/故事，证明"太阳底下无新鲜事"。
+### 第四步：思维留白 (The Philosophical Outro)
+* **目标**：总结思维模型，告诉读者这个新趋势对我们个人的思考/生活有什么启发。
 
-### 第四步：思维留白
-总结思维模型，告诉读者这个新趋势对我们个人的思考/生活有什么启发。用一句意味深长的金句结尾。
-
-## 质量过滤器：IPS 原则
+## 质量过滤器：IPS 原则 (Intellectual/Polymath/Simple)
 
 在输出前，请在后台自检（不要输出）：
-
-* **I (Intellectual)**：是否有"反直觉"的洞察？是否让读者感到智力上的愉悦？
-* **P (Polymath)**：**是否成功引用了至少一个"跨学科"的案例（历史/文学/生物等）？**
-* **S (Simple)**：核心比喻是否足够简单？是否连中学生都能看懂？
-
-## 格式要求
-
-- **字数**：1500-2000字
-- **段落**：短段落保持呼吸感
-- **加粗**：关键洞察和金句用 **加粗** 标注
-- **禁止**：列表符号、"首先/其次"、机械分点`;
-
-// ========== 辅助函数 ==========
+* **I (Intellectual)**：是否有"反直觉"的洞察？
+* **P (Polymath)**：**是否成功引用了至少一个"跨学科"的案例？**
+* **S (Simple)**：核心比喻是否足够简单？`;
 
 /**
  * 获取默认输出路径
