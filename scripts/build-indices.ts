@@ -45,7 +45,7 @@ function loadJSONL(filePath: string): any[] {
  * 构建金句库索引
  */
 async function buildQuotesIndex(): Promise<void> {
-  console.log("\n[build-indices] 构建金句库索引（测试模式：只索引 2 条）...");
+  console.log("\n[build-indices] 构建金句库索引（分批构建：每批 1,000 条）...");
 
   const jsonlFile = join(DATA_DIR, "golden_sentences.jsonl");
 
@@ -57,30 +57,56 @@ async function buildQuotesIndex(): Promise<void> {
   const data = loadJSONL(jsonlFile);
   console.log(`[build-indices]   加载 ${data.length} 条金句`);
 
-  // ===== 测试模式：只处理前 2 条 =====
-  const testData = data.slice(0, 2);
-  console.log(`[build-indices]   ⚠️  测试模式：只索引 ${testData.length} 条`);
+  // ===== 分批构建 =====
+  const BATCH_SIZE = 1000;
+  const totalBatches = Math.ceil(data.length / BATCH_SIZE);
 
-  // 转换为 Document
-  const docs: Document[] = [];
+  for (let i = 0; i < data.length; i += BATCH_SIZE) {
+    const batch = data.slice(i, Math.min(i + BATCH_SIZE, data.length));
+    const currentBatch = Math.floor(i / BATCH_SIZE) + 1;
+    const totalBatches = Math.ceil(data.length / BATCH_SIZE);
 
-  for (const item of testData) {  // 使用 testData
-    const doc = new Document({
-      text: item.content,
-      metadata: {
-        id: item.id,
-        author: item.author || "",
-        quote_type: item.quote_type || "",
-        quality_score: item.quality_score?.overall || 0,
-        source_title: item.source_title || "",
-        url: item.source_url || "",
-        category: item.category || ""
-      }
+    console.log(`[build-indices]   正在处理第 ${currentBatch}/${totalBatches} 批 (${i + batch.length}/${data.length} 条)...`);
+
+    // 转换为 Document
+    const docs: Document[] = [];
+
+    for (const item of batch) {
+      const doc = new Document({
+        text: item.content,
+        metadata: {
+          id: item.id,
+          author: item.author || "",
+          quote_type: item.quote_type || "",
+          quality_score: item.quality_score?.overall || 0,
+          source_title: item.source_title || "",
+          url: item.source_url || "",
+          category: item.category || ""
+        }
+      });
+      docs.push(doc);
+    }
+
+    console.log(`[build-indices]   开始向量化 ${docs.length} 条...`);
+
+    // 输出目录
+    const outputDir = join(INDICES_DIR, "golden_quotes");
+    mkdirSync(outputDir, { recursive: true });
+
+    // 创建 StorageContext
+    const storageContext = await storageContextFromDefaults({
+      persistDir: outputDir
     });
-    docs.push(doc);
+
+    // 构建索引（带存储上下文）
+    const index = await VectorStoreIndex.fromDocuments(docs, {
+      storageContext
+    });
+
+    console.log(`[build-indices]   ✅ 第 ${currentBatch}/${totalBatch} 批完成`);
   }
 
-  console.log(`[build-indices]   开始向量化 ${docs.length} 条...`);
+  console.log(`[build-indices]   ✅ 金句库索引全部完成: ${data.length} 条`);
 
   // 输出目录
   const outputDir = join(INDICES_DIR, "golden_quotes");

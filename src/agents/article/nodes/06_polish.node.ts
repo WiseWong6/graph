@@ -1,5 +1,5 @@
 /**
- * Polish 节点
+ * Polish 节点 v2 - 使用统一错误处理和日志
  *
  * 职责: 润色初稿,提升可读性和表达质量
  *
@@ -12,15 +12,20 @@
  * - 优化段落结构
  */
 
-import { writeFileSync } from "fs";
+import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import { ArticleState } from "../state";
 import { getNodeLLMConfig } from "../../../config/llm.js";
 import { LLMClient } from "../../../utils/llm-client.js";
 import { config } from "dotenv";
 import { resolve } from "path";
+import { createLogger } from "../../../utils/logger.js";
+import { ErrorHandler, ValidationError, retry } from "../../../utils/errors.js";
 
 config({ path: resolve(process.cwd(), ".env") });
+
+// 创建节点日志
+const log = createLogger("06_polish");
 
 /**
  * Polish 节点主函数
@@ -29,44 +34,69 @@ config({ path: resolve(process.cwd(), ".env") });
  * @returns 更新的状态
  */
 export async function polishNode(state: ArticleState): Promise<Partial<ArticleState>> {
-  console.log("[06_polish] Polishing draft...");
+  const timer = log.timer("polish");
+  log.startStep("validate_input");
 
+  // ========== 验证输入 ==========
   if (!state.draft) {
-    console.error("[06_polish] No draft to polish");
-    throw new Error("Draft not found in state");
+    throw new ValidationError("Draft content not found in state", "draft");
   }
 
+  log.completeStep("validate_input", { inputLength: state.draft.length });
+
   // ========== 构建 Prompt ==========
+  log.startStep("build_prompt");
   const prompt = buildPolishPrompt(state.draft);
+  log.completeStep("build_prompt", { promptLength: prompt.length });
 
   // ========== 调用 LLM ==========
+  log.startStep("llm_call");
   const llmConfig = getNodeLLMConfig("polish");
   const client = new LLMClient(llmConfig);
 
-  console.log("[06_polish] Calling LLM with config:", llmConfig.model);
+  log.info("LLM config:", { model: llmConfig.model, temperature: llmConfig.temperature });
 
   try {
-    const response = await client.call({
-      prompt,
-      systemMessage: POLISH_SYSTEM_MESSAGE
-    });
+    // 使用重试机制调用 LLM
+    const response = await retry(
+      () => client.call({
+        prompt,
+        systemMessage: POLISH_SYSTEM_MESSAGE
+      }),
+      { maxAttempts: 3, delay: 1000 }
+    )();
 
-    console.log("[06_polish] Polish completed, length:", response.text.length);
+    log.completeStep("llm_call", {
+      outputLength: response.text.length,
+      usage: response.usage
+    });
 
     const polished = response.text;
 
     // ========== 保存润色稿 ==========
+    log.startStep("save_output");
     const outputPath = state.outputPath || getDefaultOutputPath();
-    const polishedPath = join(outputPath, "drafts", "06_polished.md");
+    const polishDir = join(outputPath, "polish");
+
+    if (!existsSync(polishDir)) {
+      mkdirSync(polishDir, { recursive: true });
+    }
+
+    const polishedPath = join(polishDir, "06_polished.md");
     writeFileSync(polishedPath, polished, "utf-8");
-    console.log("[06_polish] Saved polished:", polishedPath);
+
+    log.completeStep("save_output", { path: polishedPath });
+    log.success(`Complete in ${timer.log()}`);
 
     return {
       polished
     };
   } catch (error) {
-    console.error(`[06_polish] Failed to polish: ${error}`);
+    log.failStep("llm_call", error);
+    ErrorHandler.handle(error, "06_polish");
+
     // 降级: 返回原稿
+    log.warn("Fallback to draft content");
     return {
       polished: state.draft
     };

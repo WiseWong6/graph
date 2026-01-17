@@ -1,5 +1,5 @@
 /**
- * Images 节点
+ * Images 节点 v2 - 并行图片生成
  *
  * 职责: 调用火山 Ark API 生成本地图片
  *
@@ -7,15 +7,20 @@
  * imagePrompts + imageConfig → Ark API → imagePaths[]
  *
  * 设计原则:
- * - 支持并行生成
+ * - 支持并行生成（并发限制）
  * - 保存到本地
- * - 错误重试
+ * - 错误重试和降级
+ * - 进度跟踪
  */
 
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import { ArticleState } from "../state";
 import { httpPost } from "../../../adapters/mcp.js";
+import { createLogger } from "../../../utils/logger.js";
+import { retry } from "../../../utils/errors.js";
+
+const log = createLogger("11_images");
 
 /**
  * Ark API 配置
@@ -50,20 +55,64 @@ interface ImageGenerationResponse {
 }
 
 /**
+ * 并发控制 - 并行执行多个异步任务
+ */
+async function parallelMap<T, R>(
+  items: T[],
+  fn: (item: T, index: number) => Promise<R>,
+  concurrency: number
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  const executing: Promise<void>[] = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const promise = fn(items[i], i).then(result => {
+      results[i] = result;
+    });
+
+    executing.push(promise);
+
+    if (executing.length >= concurrency) {
+      await Promise.race(executing);
+      executing.splice(
+        executing.findIndex(p => p === promise),
+        1
+      );
+    }
+  }
+
+  await Promise.all(executing);
+  return results;
+}
+
+/**
+ * 图片生成任务结果
+ */
+interface ImageResult {
+  index: number;
+  path?: string;
+  error?: string;
+}
+
+/**
  * Images 节点主函数
  *
  * @param state - 当前状态
  * @returns 更新的状态
  */
 export async function imagesNode(state: ArticleState): Promise<Partial<ArticleState>> {
-  console.log("[11_images] Generating images...");
+  const timer = log.timer("images");
+  log.startStep("validate_input");
 
+  // ========== 验证输入 ==========
   if (!state.imagePrompts || state.imagePrompts.length === 0) {
-    console.error("[11_images] No image prompts found");
     throw new Error("Image prompts not found in state");
   }
 
-  // 获取配置
+  log.completeStep("validate_input", { promptCount: state.imagePrompts.length });
+
+  // ========== 获取配置 ==========
+  log.startStep("setup_config");
   const config = getArkConfig();
   const imageConfig = state.decisions?.images;
 
@@ -72,9 +121,11 @@ export async function imagesNode(state: ArticleState): Promise<Partial<ArticleSt
     ? "768:1024"  // 3:4
     : "1024:768"; // 16:9
 
-  console.log(`[11_images] Config: model=${config.model}, size=${size}`);
+  log.info("Config:", { model: config.model, size });
+  log.completeStep("setup_config");
 
-  // ========== 并行生成图片 ==========
+  // ========== 准备输出目录 ==========
+  log.startStep("generate_images");
   const outputPath = state.outputPath || getDefaultOutputPath();
   const imagesDir = join(outputPath, "images");
 
@@ -82,44 +133,68 @@ export async function imagesNode(state: ArticleState): Promise<Partial<ArticleSt
     mkdirSync(imagesDir, { recursive: true });
   }
 
-  const imagePaths: string[] = [];
+  // ========== 并行生成图片（并发限制 3） ==========
   const prompts = state.imagePrompts;
+  const progress = log.progress(prompts.length, "generate");
 
-  console.log(`[11_images] Generating ${prompts.length} images...`);
-
-  for (let i = 0; i < prompts.length; i++) {
-    const prompt = prompts[i];
-    console.log(`[11_images] Generating image ${i + 1}/${prompts.length}...`);
-
-    try {
-      const imageData = await generateImage(prompt, config, size);
-
-      // 保存图片
-      const filename = `image_${String(i + 1).padStart(2, "0")}.png`;
+  const results = await parallelMap(
+    prompts,
+    async (prompt, index) => {
+      const filename = `image_${String(index + 1).padStart(2, "0")}.png`;
       const filepath = join(imagesDir, filename);
 
-      if (imageData.image_base64) {
-        // Base64 格式
-        const buffer = Buffer.from(imageData.image_base64, "base64");
-        writeFileSync(filepath, buffer);
-        console.log(`[11_images] Saved: ${filepath}`);
-        imagePaths.push(filepath);
-      } else if (imageData.image_url) {
-        // URL 格式 - 需要下载
-        console.log(`[11_images] Image URL: ${imageData.image_url}`);
-        // TODO: 实现下载逻辑
-        imagePaths.push(imageData.image_url);
+      try {
+        // 使用重试机制生成图片
+        const imageData = await retry(
+          () => generateImage(prompt, config, size),
+          { maxAttempts: 2, delay: 500 }
+        )();
+
+        // 保存图片
+        if (imageData.image_base64) {
+          const buffer = Buffer.from(imageData.image_base64, "base64");
+          writeFileSync(filepath, buffer);
+          progress.increment(`image_${index + 1}`);
+          return { index, path: filepath };
+        } else if (imageData.image_url) {
+          log.warn(`Image ${index + 1} returned URL (not implemented)`);
+          return { index, path: imageData.image_url };
+        }
+      } catch (error) {
+        log.error(`Failed to generate image ${index + 1}:`, error);
+        return { index, error: String(error) };
       }
-    } catch (error) {
-      console.error(`[11_images] Failed to generate image ${i + 1}: ${error}`);
-      // 继续生成下一张
+    },
+    3 // 并发限制
+  );
+
+  progress.complete();
+
+  // ========== 整理结果 ==========
+  const imagePaths: string[] = [];
+  const errors: string[] = [];
+
+  for (const result of results) {
+    if (result.path) {
+      imagePaths[result.index] = result.path;
+    } else if (result.error) {
+      errors.push(`Image ${result.index + 1}: ${result.error}`);
     }
   }
 
-  console.log(`[11_images] Generated ${imagePaths.length} images successfully`);
+  log.completeStep("generate_images", {
+    success: imagePaths.filter(Boolean).length,
+    failed: errors.length
+  });
+
+  if (errors.length > 0) {
+    log.warn("Some images failed:", errors);
+  }
+
+  log.success(`Complete in ${timer.log()}`);
 
   return {
-    imagePaths
+    imagePaths: imagePaths.filter(Boolean)
   };
 }
 

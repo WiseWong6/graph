@@ -1,5 +1,5 @@
 /**
- * Humanize 节点
+ * Humanize 节点 v2 - 使用统一错误处理和日志
  *
  * 职责: 去除 AI 味，增加活人感和情感共鸣
  *
@@ -24,8 +24,13 @@ import { getNodeLLMConfig } from "../../../config/llm.js";
 import { LLMClient } from "../../../utils/llm-client.js";
 import { config } from "dotenv";
 import { resolve } from "path";
+import { createLogger } from "../../../utils/logger.js";
+import { ErrorHandler, ValidationError, retry } from "../../../utils/errors.js";
 
 config({ path: resolve(process.cwd(), ".env") });
+
+// 创建节点日志
+const log = createLogger("08_humanize");
 
 /**
  * Humanize 节点主函数
@@ -34,40 +39,51 @@ config({ path: resolve(process.cwd(), ".env") });
  * @returns 更新的状态
  */
 export async function humanizeNode(state: ArticleState): Promise<Partial<ArticleState>> {
-  console.log("[08_humanize] Humanizing content...");
+  const timer = log.timer("humanize");
+  log.startStep("validate_input");
 
+  // ========== 验证输入 ==========
   // 优先使用 rewritten，降级到 polished
   const input = state.rewritten || state.polished;
 
   if (!input) {
-    console.error("[08_humanize] No content to humanize (need rewritten or polished)");
-    throw new Error("Content not found in state");
+    throw new ValidationError("Content not found in state (need rewritten or polished)", "rewritten|polished");
   }
 
   const sourceType = state.rewritten ? "rewritten" : "polished";
-  console.log(`[08_humanize] Processing ${sourceType} content, length:`, input.length);
+  log.completeStep("validate_input", { sourceType, inputLength: input.length });
 
   // ========== 构建 Prompt ==========
+  log.startStep("build_prompt");
   const prompt = buildHumanizePrompt(input);
+  log.completeStep("build_prompt", { promptLength: prompt.length });
 
   // ========== 调用 LLM ==========
+  log.startStep("llm_call");
   const llmConfig = getNodeLLMConfig("humanize");
   const client = new LLMClient(llmConfig);
 
-  console.log("[08_humanize] Calling LLM with config:", llmConfig.model);
+  log.info("LLM config:", { model: llmConfig.model, temperature: llmConfig.temperature });
 
   try {
-    const response = await client.call({
-      prompt,
-      systemMessage: HUMANIZE_SYSTEM_MESSAGE
-    });
+    // 使用重试机制调用 LLM
+    const response = await retry(
+      () => client.call({
+        prompt,
+        systemMessage: HUMANIZE_SYSTEM_MESSAGE
+      }),
+      { maxAttempts: 3, delay: 1000 }
+    )();
 
-    console.log("[08_humanize] Humanize completed, length:", response.text.length);
-    console.log("[08_humanize] Usage:", response.usage);
+    log.completeStep("llm_call", {
+      outputLength: response.text.length,
+      usage: response.usage
+    });
 
     const humanized = response.text;
 
     // ========== 保存人化稿 ==========
+    log.startStep("save_output");
     const outputPath = state.outputPath || getDefaultOutputPath();
     const humanizeDir = join(outputPath, "humanize");
 
@@ -77,15 +93,20 @@ export async function humanizeNode(state: ArticleState): Promise<Partial<Article
 
     const humanizedPath = join(humanizeDir, "08_humanized.md");
     writeFileSync(humanizedPath, humanized, "utf-8");
-    console.log("[08_humanize] Saved humanized:", humanizedPath);
+
+    log.completeStep("save_output", { path: humanizedPath });
+    log.success(`Complete in ${timer.log()}`);
 
     return {
       humanized,
       outputPath
     };
   } catch (error) {
-    console.error(`[08_humanize] Failed to humanize: ${error}`);
+    log.failStep("llm_call", error);
+    ErrorHandler.handle(error, "08_humanize");
+
     // 降级: 返回原输入
+    log.warn("Fallback to input content");
     return {
       humanized: input
     };
