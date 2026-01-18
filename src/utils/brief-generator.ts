@@ -39,6 +39,9 @@ export interface BriefData {
   angles?: Angle[];              // 差异化角度
   recommended_angle?: Angle;     // 推荐角度
 
+  // 新增：完整的 Markdown 调研报告（11 部分结构）
+  markdown_report?: string;      // LLM 生成的完整报告
+
   // 元数据
   generated_at: string;
   research_time_ms: number;
@@ -56,12 +59,20 @@ export interface Angle {
 }
 
 /**
- * 生成 Brief Markdown（重构版 - 内容创作视角）
+ * 生成 Brief Markdown（重构版 - 支持完整报告）
+ *
+ * 优先使用 LLM 生成的完整 Markdown 报告，否则使用简化版本
  *
  * @param data - Brief 数据
  * @returns Markdown 格式的 Brief
  */
 export function generateBriefMarkdown(data: BriefData): string {
+  // 如果存在完整的 Markdown 报告，直接返回
+  if (data.markdown_report) {
+    return data.markdown_report;
+  }
+
+  // 否则使用原有的简化版本
   const lines: string[] = [];
 
   // 标题
