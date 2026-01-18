@@ -183,16 +183,16 @@ models:
         temperature: 0.3  # 降低随机性，确保重生成时结果一致
       timeout: 60  # seconds
 
-    # 图片提示词生成节点
+    # 图片提示词生成节点（使用 deepseek-chat 避免思考过程泄露）
     image_prompt:
       provider: deepseek
-      model: deepseek-reasoner
+      model: deepseek-chat
       base_url: https://api.deepseek.com
       api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 2048
         temperature: 0.7
-      timeout: 120  # seconds
+      timeout: 60  # seconds (chat 模型响应更快)
 
     # 图片生成节点（如使用 DALL-E）
     image_gen:

@@ -5,7 +5,7 @@
  * 测试五风格图片提示词生成
  */
 
-import { promptsNode } from "../src/agents/article/nodes/10_prompts.node.js";
+import { promptsNode } from "../src/agents/article/nodes/09_prompts.node.js";
 import { ArticleState, ImageStyle } from "../src/agents/article/state.js";
 import { config } from "dotenv";
 import { resolve } from "path";
@@ -206,7 +206,7 @@ async function testStyle(style: ImageStyle): Promise<boolean> {
       researchResult: "",
       ragContent: "",
       titles: [],
-      draft: "",
+      draft: article,  // promptsNode 使用 draft 字段
       polished: "",
       rewritten: "",
       imagePrompts: [],

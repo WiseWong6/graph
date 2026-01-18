@@ -1,6 +1,6 @@
 # Write Agent - 进度跟踪
 
-> 最后更新: 2026-01-18 (删除 Polish + 增强 Gate C)
+> 最后更新: 2026-01-18 (修复 Prompts 节点 Reasoner 泄露)
 
 ## 项目概述
 
@@ -319,27 +319,33 @@ npm run test-full     # 完整流程验证
 ### 已修复问题 ✅（2026-01-18）
 
 **本次更新**:
-1. **Gate C (select_title) 增强** ✅
+1. **10_prompts 节点 Reasoner 泄露修复** ✅ (2026-01-18)
+   - 切换模型: `deepseek-reasoner` → `deepseek-chat`
+   - 超时优化: 120s → 60s（chat 模型更快）
+   - 消除思考过程泄露到控制台的问题
+   - JSON 输出更清晰可靠
+
+2. **Gate C (select_title) 增强** ✅
    - 添加自定义标题输入功能（含可选备注）
    - 添加重新生成标题选项
    - 使用 inquirer.Separator 美化选项列表
 
-2. **Gate C 条件边实现** ✅
+3. **Gate C 条件边实现** ✅
    - 添加重新生成标题的条件边路由
    - 修复提前返回 bug
    - temperature 从 0.9 降至 0.3 确保重生成一致性
 
-3. **Draft 节点标题约束强化** ✅
+4. **Draft 节点标题约束强化** ✅
    - 移除 fallback 逻辑
    - 强制要求用户选择标题
    - 未选择时抛出错误
 
-4. **Polish 节点删除** ✅
+5. **Polish 节点删除** ✅
    - 删除 06_polish.node.ts
    - Graph 从 15 节点减少到 14 节点
    - 流程: Draft → Rewrite（跳过 Polish）
 
-5. **阶段1 验证完成** ✅
+6. **阶段1 验证完成** ✅
    - 5 个节点全部验证通过
    - Titles + Gate C 重生成功能验证通过
 

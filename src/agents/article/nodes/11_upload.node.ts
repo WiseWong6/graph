@@ -51,8 +51,12 @@ export async function uploadImagesNode(state: ArticleState): Promise<Partial<Art
     };
   }
 
-  // 获取微信配置
-  const config = getWechatConfig();
+  // 使用 select_wechat 节点选择的微信配置
+  const config = state.wechat;
+
+  if (!config) {
+    throw new Error("WeChat config not found in state. Please run select_wechat first.");
+  }
 
   console.log(`[11.5_upload] Uploading ${state.imagePaths.length} images...`);
 
@@ -119,11 +123,13 @@ async function uploadImage(
   // 首先获取 access_token
   const token = await getAccessToken(config);
 
-  // 构建 FormData
+  // 构建 FormData - Node.js 需要显式指定 filename
   const formData = new FormData();
-  const blob = new Blob([imageBuffer]);
-  formData.append("media", blob);
-  formData.append("type", "image");
+
+  // 从 Buffer 创建 File 对象（Node.js 18+ 支持）
+  // 或使用 Blob 并指定文件名
+  const file = new File([imageBuffer], "image.png", { type: "image/png" });
+  formData.append("media", file);
 
   // 上传图文消息图片
   const response = await httpPostFormData<UploadImageResponse>(
@@ -146,39 +152,28 @@ async function uploadImage(
  * 获取 access_token
  */
 async function getAccessToken(config: WechatConfig): Promise<string> {
-  const response = await fetch(
-    `${config.apiUrl}/cgi-bin/token?grant_type=client_credential&appid=${config.appId}&secret=${config.appSecret}`
-  );
+  const url = `${config.apiUrl}/cgi-bin/token?grant_type=client_credential&appid=${config.appId}&secret=${config.appSecret}`;
+  console.log("[11.5_upload] Token API URL:", url.replace(config.appSecret, "***"));
+  const response = await fetch(url);
 
   if (!response.ok) {
     throw new Error(`Failed to get access_token: ${response.statusText}`);
   }
 
-  const data = await response.json() as { access_token: string };
+  const data = await response.json() as { access_token: string; errcode?: number; errmsg?: string };
+
+  // 打印完整响应用于调试
+  console.log("[11.5_upload] Token API response:", JSON.stringify(data));
+
+  if (data.errcode && data.errcode !== 0) {
+    throw new Error(`Failed to get access_token: ${data.errmsg} (errcode: ${data.errcode})`);
+  }
 
   if (!data.access_token) {
     throw new Error("Failed to get access_token: no token returned");
   }
 
   return data.access_token;
-}
-
-/**
- * 获取微信配置
- */
-function getWechatConfig(): WechatConfig {
-  const appId = process.env.WECHAT_APP_ID;
-  const appSecret = process.env.WECHAT_APP_SECRET;
-
-  if (!appId || !appSecret) {
-    throw new Error("WECHAT_APP_ID and WECHAT_APP_SECRET must be set");
-  }
-
-  return {
-    appId,
-    appSecret,
-    apiUrl: process.env.WECHAT_API_URL || "https://api.weixin.qq.com"
-  };
 }
 
 /**

@@ -136,8 +136,21 @@ export async function titlesNode(state: ArticleState): Promise<Partial<ArticleSt
       console.log(`  ${i + 1}. ${title}`);
     });
 
+    // ========== 7. 合并 Brief 中的标题 ==========
+    const briefTitles = extractBriefTitles(state.researchResult || "");
+    console.log(`[03_titles] Extracted ${briefTitles.length} titles from brief:`);
+    briefTitles.forEach((title, i) => {
+      console.log(`  [Brief ${i + 1}] ${title}`);
+    });
+
+    // 合并并去重
+    const allTitles = [...titles, ...briefTitles];
+    const uniqueTitles = Array.from(new Set(allTitles));
+
+    console.log(`[03_titles] Total ${uniqueTitles.length} unique titles (after merge)`);
+
     return {
-      titles
+      titles: uniqueTitles
     };
   } catch (error) {
     console.error(`[03_titles] Failed to generate titles: ${error}`);
@@ -146,8 +159,16 @@ export async function titlesNode(state: ArticleState): Promise<Partial<ArticleSt
     const fallbackTitles = generateFallbackTitles(state.topic || state.prompt);
     console.log("[03_titles] Using fallback titles");
 
+    // 仍然尝试提取 Brief 标题
+    const briefTitles = extractBriefTitles(state.researchResult || "");
+    console.log(`[03_titles] Extracted ${briefTitles.length} titles from brief (fallback mode)`);
+
+    // 合并并去重
+    const allTitles = [...fallbackTitles, ...briefTitles];
+    const uniqueTitles = Array.from(new Set(allTitles));
+
     return {
-      titles: fallbackTitles
+      titles: uniqueTitles
     };
   }
 }
@@ -310,4 +331,44 @@ function parseRecommendedAngle(briefText: string): RecommendedAngle | null {
     dataPoints: dataPoints.length > 0 ? dataPoints : undefined,
     coreTakeaway: coreTakeaway || undefined
   };
+}
+
+/**
+ * 从 Brief 中提取标题
+ *
+ * 提取两类标题:
+ * 1. 写作角度标题: "### 角度 X：标题内容" -> "标题内容"
+ * 2. 标题建议: "1. 《标题》" -> "标题" (去除书名号)
+ */
+function extractBriefTitles(briefText: string): string[] {
+  const titles: string[] = [];
+
+  // 1. 提取写作角度标题
+  // 匹配: ### 角度 [数字]：[内容]
+  const angleRegex = /###\s*角度\s+\d+[：:]\s*(.+)$/gm;
+  let match;
+  while ((match = angleRegex.exec(briefText)) !== null) {
+    const title = match[1].trim();
+    if (title.length > 4 && title.length < 100) {
+      titles.push(title);
+    }
+  }
+
+  // 2. 提取标题建议
+  // 匹配: ### 标题建议 部分
+  const suggestionsMatch = briefText.match(/###\s*标题建议\s*\n([\s\S]+?)(?=##|\n\n|$)/i);
+  if (suggestionsMatch) {
+    const suggestionsText = suggestionsMatch[1];
+    // 提取列表项: 1. 《标题》 或 1. 标题
+    const itemRegex = /^\s*\d+[\.\)]\s*[《「]?(.+?)[》」]?\s*$/gm;
+    while ((match = itemRegex.exec(suggestionsText)) !== null) {
+      const title = match[1].trim();
+      if (title.length > 4 && title.length < 100) {
+        titles.push(title);
+      }
+    }
+  }
+
+  // 去重
+  return Array.from(new Set(titles));
 }
