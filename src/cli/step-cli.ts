@@ -185,27 +185,6 @@ function formatNodeOutput(nodeName: string, state: ArticleState): string {
   return lines.join("\n");
 }
 
-/**
- * 显示节点完成信息
- */
-function showNodeComplete(nodeName: string, state: ArticleState) {
-  const info = NODE_INFO[nodeName] || { name: nodeName, description: "", hasOutput: false };
-
-  console.log("\n" + "═".repeat(60));
-  console.log(chalk.green.bold(`✅ 完成: ${info.name}`));
-  if (info.description) {
-    console.log(chalk.gray(`   ${info.description}`));
-  }
-  console.log("═".repeat(60));
-
-  if (info.hasOutput) {
-    const output = formatNodeOutput(nodeName, state);
-    if (output) {
-      console.log("\n" + output);
-    }
-  }
-  console.log("");
-}
 
 /**
  * 用户交互菜单
@@ -357,43 +336,131 @@ export async function main() {
   console.log(chalk.gray("═══════════════════════════════════════════════════════════\n"));
 
   try {
-    // 使用 stream 而不是 invoke，这样可以监听每个节点
-    const stream = await fullArticleGraph.stream(
-      { prompt },
-      config
-    );
+    // 使用 streamEvents 而不是 stream，以获得节点生命周期事件
+    // 这允许我们检测并行执行（on_chain_start）和完成时间
+    let eventStream: AsyncIterable<unknown>;
+    let useEventsMode = true;
 
-    let lastState: ArticleState | null = null;
+    try {
+      eventStream = await fullArticleGraph.streamEvents(
+        { prompt },
+        {
+          ...config,
+          version: "v2"  // 必须指定 v2 版本以获得完整事件
+        }
+      );
+    } catch (eventsError) {
+      // 降级：如果 streamEvents 不可用，使用原始 stream 方法
+      console.log(chalk.yellow("⚠️ 并行检测不可用，使用基础模式"));
+      eventStream = await fullArticleGraph.stream({ prompt }, config);
+      useEventsMode = false;
+    }
 
-    for await (const event of stream) {
-      // LangGraph stream 事件格式：{ nodeName: { state updates } }
-      const eventEntries = Object.entries(event);
-      if (eventEntries.length === 0) continue;
+    // 并行执行追踪器
+    interface ParallelTracker {
+      activeNodes: Map<string, number>;  // nodeName → startTime
+      completedNodes: Set<string>;
+      lastState: ArticleState | null;
+    }
 
-      const [nodeName, stateUpdate] = eventEntries[0];
+    const tracker: ParallelTracker = {
+      activeNodes: new Map(),
+      completedNodes: new Set(),
+      lastState: null
+    };
 
-      // 跳过非节点事件
-      if (!nodeName || nodeName === "__start__" || nodeName === "__end__") {
-        continue;
-      }
+    for await (const event of eventStream) {
+      // 根据模式解析事件
+      let eventType: string | undefined;
+      let nodeName: string | undefined;
+      let stateUpdate: Partial<ArticleState> | undefined;
 
-      // 合并状态更新
-      if (stateUpdate && typeof stateUpdate === "object" && !Array.isArray(stateUpdate)) {
-        const update = stateUpdate as Partial<ArticleState>;
-        if (!lastState) {
-          lastState = { ...(update as ArticleState) };
-        } else {
-          // 使用 Object.assign 避免 spread 类型问题
-          lastState = Object.assign({}, lastState, update) as ArticleState;
+      if (useEventsMode) {
+        // streamEvents 模式：{ event, name, data }
+        const ev = event as { event: string; name: string; data?: { output?: unknown } };
+        eventType = ev.event;
+        nodeName = ev.name;
+        if (eventType === "on_chain_end" && ev.data?.output) {
+          stateUpdate = ev.data.output as Partial<ArticleState>;
+        }
+      } else {
+        // stream 模式（降级）：{ nodeName: { state updates } }
+        const ev = event as Record<string, unknown>;
+        const entries = Object.entries(ev);
+        if (entries.length > 0) {
+          nodeName = entries[0][0];
+          stateUpdate = entries[0][1] as Partial<ArticleState>;
+          eventType = "on_chain_end"; // stream 只产生完成事件
         }
       }
 
-      // 显示节点完成
-      showNodeComplete(nodeName, lastState || ({} as ArticleState));
+      // 跳过内部事件（如 __start__, __end__ 等）
+      if (!nodeName || nodeName.startsWith("__")) continue;
 
-      // 只在交互式节点后暂停
-      const nodeInfo = NODE_INFO[nodeName];
-      if (nodeInfo?.isInteractive) {
+      // 节点启动事件 - 检测并行执行
+      if (eventType === "on_chain_start") {
+        tracker.activeNodes.set(nodeName, Date.now());
+
+        const activeCount = tracker.activeNodes.size;
+        const nodeInfo = NODE_INFO[nodeName];
+        const displayName = nodeInfo?.name || nodeName;
+
+        if (activeCount > 1) {
+          // 检测到并行执行：显示当前活跃节点
+          const nodes = Array.from(tracker.activeNodes.keys())
+            .map(n => NODE_INFO[n]?.name || n)
+            .join(" + ");
+          console.log(chalk.yellow(`⚡ 并行执行 [${activeCount}]: ${nodes}`));
+        } else {
+          // 单节点执行
+          console.log(chalk.gray(`▶️ ${displayName}`));
+        }
+      }
+
+      // 节点完成事件
+      if (eventType === "on_chain_end") {
+        const startTime = tracker.activeNodes.get(nodeName) || Date.now();
+        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+        tracker.activeNodes.delete(nodeName);
+        tracker.completedNodes.add(nodeName);
+
+        const nodeInfo = NODE_INFO[nodeName];
+        const displayName = nodeInfo?.name || nodeName;
+
+        // 合并状态更新
+        if (stateUpdate && typeof stateUpdate === "object") {
+          if (!tracker.lastState) {
+            tracker.lastState = { ...(stateUpdate as ArticleState) };
+          } else {
+            tracker.lastState = Object.assign({}, tracker.lastState, stateUpdate) as ArticleState;
+          }
+        }
+
+        // 显示完成信息
+        if (nodeInfo?.hasOutput) {
+          console.log(chalk.green(`✅ ${displayName} (${duration}s)`));
+        } else {
+          console.log(chalk.dim(`✓ ${displayName} (${duration}s)`));
+        }
+
+        // 如果还有活跃节点，显示剩余进度
+        if (tracker.activeNodes.size > 0) {
+          const remaining = Array.from(tracker.activeNodes.keys())
+            .map(n => NODE_INFO[n]?.name || n);
+          console.log(chalk.dim(`   ⏳ 进行中: ${remaining.join(", ")}`));
+        }
+
+        // 显示输出预览（如果有）
+        if (nodeInfo?.hasOutput && tracker.lastState) {
+          const output = formatNodeOutput(nodeName, tracker.lastState);
+          if (output) {
+            console.log("\n" + output + "\n");
+          }
+        }
+      }
+
+      // 交互节点：等待用户输入
+      if (eventType === "on_chain_end" && NODE_INFO[nodeName]?.isInteractive) {
         // 确保输出完全刷新后再显示用户菜单
         await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -405,10 +472,10 @@ export async function main() {
           console.log(chalk.gray(`使用 --resume 可从当前状态继续\n`));
           console.log(chalk.gray(`Thread ID: ${threadId}\n`));
           process.exit(0);
-        } else if (action === "view") {
-          await showFullOutput(nodeName, lastState || ({} as ArticleState));
+        } else if (action === "view" && tracker.lastState) {
+          await showFullOutput(nodeName, tracker.lastState);
         }
-      } else {
+      } else if (eventType === "on_chain_end") {
         // 非交互式节点：短暂延迟后继续
         await new Promise(resolve => setTimeout(resolve, 50));
       }
@@ -419,12 +486,12 @@ export async function main() {
     console.log(chalk.green.bold("🎉 流程完成！"));
     console.log("═".repeat(60) + "\n");
 
-    if (lastState) {
+    if (tracker.lastState) {
       console.log(chalk.gray("最终状态:"));
-      console.log(chalk.gray(`  主题: ${lastState.topic || prompt}`));
-      console.log(chalk.gray(`  选中标题: ${lastState.decisions?.selectedTitle || "无"}`));
-      console.log(chalk.gray(`  输出目录: ${lastState.outputPath || "无"}`));
-      console.log(chalk.gray(`  状态: ${lastState.status || "完成"}\n`));
+      console.log(chalk.gray(`  主题: ${tracker.lastState.topic || prompt}`));
+      console.log(chalk.gray(`  选中标题: ${tracker.lastState.decisions?.selectedTitle || "无"}`));
+      console.log(chalk.gray(`  输出目录: ${tracker.lastState.outputPath || "无"}`));
+      console.log(chalk.gray(`  状态: ${tracker.lastState.status || "完成"}\n`));
     }
 
   } catch (error) {

@@ -87,14 +87,18 @@ export class LanceDBVectorStore extends BaseVectorStore {
       if (node.metadata?.content && typeof node.metadata.content === "string") {
         textContent = node.metadata.content;
       }
-      // 2. 否则尝试 node.text
+      // 2. 尝试 node.text (TextNode)
       else if ((node as any).text) {
         textContent = (node as any).text;
       }
-      // 3. 最后使用 NONE 模式获取纯文本（不含 metadata）
+      // 3. 使用 getContent(MetadataMode.NONE)
       else {
         const content = node.getContent(MetadataMode.NONE);
         textContent = typeof content === "string" ? content : String(content);
+      }
+
+      if (!textContent) {
+        console.warn(`[LanceDB] ⚠️ 警告: 节点 ${node.id_} 文本内容为空!`);
       }
 
       return {

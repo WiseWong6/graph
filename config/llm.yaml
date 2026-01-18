@@ -172,16 +172,16 @@ models:
         temperature: 0.8  # 较高温度，增加自然表达
       timeout: 120  # seconds
 
-    # 标题生成节点：使用经济型模型
+    # 标题生成节点：使用 deepseek-chat（无推理过程，输出简洁）
     title_gen:
       provider: deepseek
-      model: deepseek-reasoner
+      model: deepseek-chat
       base_url: https://api.deepseek.com
       api_key_env: DEEPSEEK_API_KEY
       params:
-        max_tokens: 2048  # 增加以支持生成 8 个标题
+        max_tokens: 2048
         temperature: 0.9  # 高创造性
-      timeout: 180  # seconds
+      timeout: 60  # seconds
 
     # 图片提示词生成节点
     image_prompt:
@@ -374,6 +374,59 @@ prompts:
     输出格式：
     - 标题列表（每行一个）
     - 每个标题的简要说明
+
+  title_gen_system: |
+    你是爆款标题生成器。你的任务是根据用户提供的变量，为指定主题生成标题。
+
+    你必须遵守以下规则：
+    1. 只输出 JSON，不要输出任何解释、推理过程、Markdown、代码块或多余文字
+    2. 标题口语化，3 秒看懂“对我有什么用”，且不夸大、不写“100%/永久有效/稳赚不赔”
+    3. 每个标题至少命中 2 个“开幕雷击要素”
+    4. 标题长度优先 16–24 字，最长不超过 {max_length} 字
+    5. 标题类型按 6 种均匀生成（A-F），避免同质化
+
+    开幕雷击要素（合规使用）：
+    1) 金钱/成本/收益（省钱、付费、预算、成本、收益、买错、亏了）
+    2) 数字/数据（3个、7天、10分钟、从0到1、99%）
+    3) 捷径/偷懒/速成（一步到位、保姆级、直接抄、懒人法）
+    4) 异常/反差（我以为…结果…；看似对其实错；越努力越翻车）
+    5) 悬念/说一半（直到…才发现；最关键的是…；千万别先做…）
+    6) 强情绪词（破防、离谱、气笑、救命、震惊、后悔、庆幸）
+    7) 权威/稀缺（我踩坑总结、内部模板、业内常用、只讲一次）
+
+    6 种标题类型（均匀覆盖）：
+    A. 清单合集型：{数字}+{资源/坑/方法}+（直接抄/别再）
+    B. 教程流程型：保姆级/一步到位/从0到1 + {目标}
+    C. 反差异常型：我以为…结果…（越…越…）
+    D. 悬念问句型：为什么…？直到…才…；千万别…
+    E. 省钱替代型：还在付费/买错？我用…替代…
+    F. 权威稀缺型：我踩坑总结/内部模板/只讲一次
+
+    输出 JSON Schema（严格遵守）：
+    {
+      "titles": ["string", "string", "..."]
+    }
+
+  title_gen_user: |
+    主题：{topic}
+    平台：{platform}
+    生成数量：{count}
+    最大字数：{max_length}
+
+    推荐角度：{angle_name}
+    核心论点：{angle_core_argument}
+    核心结论：{core_takeaway}
+
+    核心洞察：
+    {key_insights}
+
+    数据支撑：
+    {data_points}
+
+    参考标题（可借鉴风格，不要照抄）：
+    {reference_titles}
+
+    仅输出 JSON：{"titles":[...]}
 
   # 图片提示词生成节点 Prompt
   image_prompt: |

@@ -7,7 +7,8 @@
       "mcp__zread__read_file",
       "mcp__zread__search_doc",
       "Skill(wechat-draftbox)",
-      "Skill(article-workflow)"
+      "Skill(article-workflow)",
+      "Skill(article-plug-classicLines)"
     ]
   }
 }

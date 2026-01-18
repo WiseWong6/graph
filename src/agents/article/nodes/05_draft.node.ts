@@ -59,10 +59,15 @@ interface ParsedRAG {
  * @returns 更新的状态
  */
 export async function draftNode(state: ArticleState): Promise<Partial<ArticleState>> {
-  console.log("[05_draft] Writing draft for title:", state.decisions?.selectedTitle || state.titles?.[0]);
-
   // ========== 获取标题 ==========
-  const title = state.decisions?.selectedTitle || state.titles?.[0] || state.topic || "无标题";
+  const title = state.decisions?.selectedTitle;
+
+  // 强制要求用户选择标题
+  if (!title) {
+    throw new Error("[05_draft] 错误: 未选择标题，请先通过 Gate C 选择标题");
+  }
+
+  console.log("[05_draft] Writing draft for title:", title);
 
   // ========== 解析 Brief 和 RAG ==========
   const brief = parseBrief(state.researchResult || "");

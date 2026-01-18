@@ -15,6 +15,7 @@
 
 import { ArticleState } from "../state";
 import { getNodeLLMConfig } from "../../../config/llm.js";
+import { getPromptTemplate } from "../../../config/llm.js";
 import { LLMClient } from "../../../utils/llm-client.js";
 import IndexManager from "../../../rag/index/index-manager.js";
 import { config } from "dotenv";
@@ -92,7 +93,29 @@ export async function titlesNode(state: ArticleState): Promise<Partial<ArticleSt
   };
 
   // ========== 4. 构建 Prompt ==========
-  const prompt = buildTitlePrompt(state, titleConfig, angle, referenceTitles);
+  const topic = state.topic || state.prompt;
+  const systemTemplate =
+    getPromptTemplate("title_gen_system") ||
+    '你是爆款标题生成器。只输出 JSON：{"titles":[...]}';
+  const userTemplate =
+    getPromptTemplate("title_gen_user") ||
+    '主题：{topic}\n平台：{platform}\n生成数量：{count}\n最大字数：{max_length}\n参考标题：\n{reference_titles}\n仅输出 JSON：{"titles":[...]}';
+
+  const vars = {
+    topic,
+    platform: (titleConfig.platform || []).join(","),
+    count: String(titleConfig.count),
+    max_length: String(titleConfig.maxLength),
+    angle_name: angle?.name || "",
+    angle_core_argument: angle?.coreArgument || "",
+    core_takeaway: angle?.coreTakeaway || "",
+    key_insights: (angle?.keyInsights || []).map((x) => `- ${x}`).join("\n"),
+    data_points: (angle?.dataPoints || []).map((x) => `- ${x}`).join("\n"),
+    reference_titles: referenceTitles.map((t) => `- ${t}`).join("\n")
+  };
+
+  const systemMessage = renderTemplate(systemTemplate, vars);
+  const prompt = renderTemplate(userTemplate, vars);
 
   // ========== 5. 调用 LLM ==========
   const llmConfig = getNodeLLMConfig("title_gen");
@@ -101,10 +124,7 @@ export async function titlesNode(state: ArticleState): Promise<Partial<ArticleSt
   console.log("[03_titles] Calling LLM with config:", llmConfig.model);
 
   try {
-    const response = await client.call({
-      prompt,
-      systemMessage: TITLE_SYSTEM_MESSAGE
-    });
+    const response = await client.call({ prompt, systemMessage });
 
     console.log("[03_titles] LLM response received, parsing titles...");
 
@@ -135,211 +155,67 @@ export async function titlesNode(state: ArticleState): Promise<Partial<ArticleSt
 /**
  * 构建标题生成 Prompt（爆款标题框架）
  */
-function buildTitlePrompt(
-  state: ArticleState,
-  config: TitleGenerationConfig,
-  angle: RecommendedAngle | null,
-  referenceTitles: string[]
-): string {
-  const topic = state.topic || state.prompt;
-
-  const lines: string[] = [];
-
-  // ========== 1. 任务定义 ==========
-  lines.push(`# 任务：为主题"${topic}"生成 ${config.count} 个爆款标题\n`);
-
-  // ========== 2. 输入素材 ==========
-  if (angle?.coreTakeaway) {
-    lines.push("## 核心结论（一句话）");
-    lines.push(angle.coreTakeaway);
-    lines.push("");
-  }
-
-  if (angle?.keyInsights && angle.keyInsights.length > 0) {
-    lines.push("## 核心洞察");
-    angle.keyInsights.forEach((insight, i) => {
-      lines.push(`${i + 1}. ${insight}`);
-    });
-    lines.push("");
-  }
-
-  if (angle?.name) {
-    lines.push("## 推荐写作角度");
-    lines.push(`**${angle.name}**：${angle.coreArgument}`);
-    if (angle.evidence && angle.evidence.length > 0) {
-      lines.push(`论据：${angle.evidence.join("；")}`);
-    }
-    lines.push("");
-  }
-
-  if (angle?.dataPoints && angle.dataPoints.length > 0) {
-    lines.push("## 数据支撑");
-    angle.dataPoints.forEach((data) => {
-      lines.push(`- ${data}`);
-    });
-    lines.push("");
-  }
-
-  if (referenceTitles.length > 0) {
-    lines.push("## 参考标题（同类优质标题，仅供参考风格）");
-    referenceTitles.forEach((title, i) => {
-      lines.push(`${i + 1}. ${title}`);
-    });
-    lines.push("");
-  }
-
-  // ========== 3. 标题类型指导 ==========
-  lines.push("## 请按 6 种类型均匀生成标题");
-  lines.push("A. 清单合集型：{数字}+{资源/坑/方法}+（直接抄/别再）");
-  lines.push("B. 教程流程型：保姆级/一步到位/从0到1 + {目标}");
-  lines.push("C. 反差异常型：我以为…结果…（越…越…）");
-  lines.push("D. 悬念问句型：为什么…？直到…才…；千万别…");
-  lines.push("E. 省钱替代型：还在付费/买错？我用…替代…");
-  lines.push("F. 权威稀缺型：我踩坑总结/内部模板/只讲一次");
-  lines.push("");
-
-  // ========== 4. 输出要求 ==========
-  lines.push("## 输出要求");
-  lines.push(`1. 生成 ${config.count} 个标题，不要编号`);
-  lines.push("2. 每个标题至少命中 2 个开幕雷击要素");
-  lines.push("3. 在标题后用括号标注命中要素，例如：（数字+悬念）");
-  lines.push("4. 长度 16-24 字，最长不超过 30 字");
-  lines.push("");
-
-  lines.push("**正确示例**（带要素标注）：");
-  lines.push("突发：苹果与谷歌为何联手反击OpenAI？（悬念+数字）");
-  lines.push("两大巨头联手，将如何改变你的手机？（数字+悬念+情绪）");
-  lines.push("《苹果谷歌合作，会带来哪五个革命性改变？》（数字+悬念）");
-  lines.push("还在付费买AI？苹果谷歌联手后，我改用这招（省钱+反差+悬念）");
-  lines.push("我以为苹果谷歌是死对头，结果竟然联手了（反差+情绪）");
-  lines.push("");
-
-  lines.push("**禁止格式**：");
-  lines.push("1. 标题");
-  lines.push("- 标题");
-  lines.push("```json\n```");
-
-  return lines.join("\n");
+function renderTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key) => vars[key] ?? "");
 }
 
 /**
  * System Message - 爆款标题生成器
  */
-const TITLE_SYSTEM_MESSAGE = `你是爆款标题生成器，擅长创作高点击率标题。
-
-## 开幕雷击要素（合规使用）
-你必须从以下要素中为每个标题至少选择 2 个组合：
-1) 金钱/成本/收益（省钱、付费、预算、成本、收益、买错、亏了）
-2) 数字/数据（3个、7天、10分钟、从0到1、99%）
-3) 捷径/偷懒/速成（一步到位、保姆级、直接抄、懒人法）
-4) 异常/反差（我以为…结果…；看似对其实错；越努力越翻车）
-5) 悬念/说一半（直到…才发现；最关键的是…；千万别先做…）
-6) 强情绪词（破防、离谱、气笑、救命、震惊、后悔、庆幸）
-7) 权威/稀缺（我踩坑总结、内部模板、业内常用、只讲一次）
-
-## 标题写作硬规则
-1) 口语化：像人在聊天，不要论文句
-2) 清晰：读者 3 秒能看懂"对我有什么用"
-3) 长度：优先 16–24 个汉字；最长不超过 30
-4) 标点：允许「！？｜…‼️」增强冲击，但别堆满
-5) 数字优先：能数字化就数字化（时间/步骤/数量/比例）
-6) 不夸大：不写"100%""永久有效""稳赚不赔"等
-7) 平台适配：公众号更适合"干货/悬念/情绪+反差"
-
-## 6 种标题类型
-A. 清单合集型：{数字}+{资源/坑/方法}+（直接抄/别再）
-B. 教程流程型：保姆级/一步到位/从0到1 + {目标}
-C. 反差异常型：我以为…结果…（越…越…）
-D. 悬念问句型：为什么…？直到…才…；千万别…
-E. 省钱替代型：还在付费/买错？我用…替代…
-F. 权威稀缺型：我踩坑总结/内部模板/只讲一次`;
-
 /**
  * 解析 LLM 输出的标题
  * 增强容错性，支持多种 LLM 输出格式
  * 支持移除要素标注：（数字+悬念）
  */
 function parseTitles(text: string, expectedCount: number): string[] {
-  const titles: string[] = [];
-
-  // 1. 先尝试 JSON 解析
-  if (text.trim().startsWith("[") || text.trim().startsWith("{")) {
+  const jsonText = extractJsonText(text);
+  if (jsonText) {
     try {
-      const parsed = JSON.parse(text);
-      if (Array.isArray(parsed)) {
-        for (const item of parsed) {
-          const title = typeof item === "string" ? item : item.title || item.text;
-          if (title && title.length >= 4 && title.length < 50) {
-            titles.push(title);
-          }
-        }
-        if (titles.length > 0) {
-          console.log(`[03_titles] JSON 解析成功: ${titles.length} 个标题`);
-          return titles.slice(0, expectedCount);
-        }
-      }
-    } catch (e) {
-      console.log(`[03_titles] JSON 解析失败，尝试文本解析`);
-    }
+      const parsed = JSON.parse(jsonText);
+      const titles = Array.isArray(parsed?.titles) ? parsed.titles : Array.isArray(parsed) ? parsed : [];
+      const cleaned = normalizeTitles(titles).slice(0, expectedCount);
+      if (cleaned.length > 0) return cleaned;
+    } catch {}
   }
 
-  // 2. 提取代码块内容（如果 LLM 输出在 ```json 中）
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  return normalizeTitles(lines).slice(0, expectedCount);
+}
+
+function extractJsonText(text: string): string | null {
   const codeBlockMatch = text.match(/```(?:json)?\s*\n([\s\S]+?)\n```/);
-  const contentToParse = codeBlockMatch ? codeBlockMatch[1] : text;
+  const candidate = codeBlockMatch ? codeBlockMatch[1] : text;
+  const start = candidate.indexOf("{");
+  const end = candidate.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return null;
+  return candidate.slice(start, end + 1).trim();
+}
 
-  // 3. 按行分割
-  const lines = contentToParse.split("\n").map(l => l.trim()).filter(l => l);
+function normalizeTitles(input: any[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of input) {
+    let title = typeof raw === "string" ? raw : raw?.title || raw?.text;
+    if (typeof title !== "string") continue;
+    title = title
+      .trim()
+      .replace(/^\d+[\.\)]\s*/, "")
+      .replace(/^[-•*●▪]\s*/, "")
+      .replace(/^第?\d+[、.]\s*/, "")
+      .replace(/^标题[\d：:]\s*/, "")
+      .replace(/（[^）]*）$/, "")
+      .replace(/\([^)]*\)$/, "")
+      .replace(/^\s*["'「『【]/, "")
+      .replace(/["'」』】]\s*$/, "")
+      .replace(/\s+/g, " ")
+      .trim();
 
-  for (const line of lines) {
-    // 跳过非标题行（增强过滤规则）
-    if (line.match(/^(标题|输出|示例|Note|Comment|推荐|参考|风格|正确|禁止|格式|任务|核心|洞察)/i)) {
-      continue;
-    }
-    if (line.match(/^\s*[-=]{3,}/)) {
-      continue;
-    }
-    if (line.startsWith("```")) {
-      continue;
-    }
-    if (line.includes("**") && line.includes("**")) {
-      continue; // 跳过 Markdown 格式行
-    }
-
-    // 移除编号和要素标注（支持多种格式）
-    let title = line
-      .replace(/^\d+[\.\)]\s*/, "")           // "1. " 或 "1) "
-      .replace(/^[-•*●▪]\s*/, "")             // "- " 或 "* "
-      .replace(/^第?\d+[、.]/, "")            // "第1、" 或 "1、"
-      .replace(/^\([0-9a-zA-Z]+\) /, "")      // "(1) " 格式
-      .replace(/^标题[\d：:]\s*/, "")         // "标题1:" 或 "标题1："
-      .replace(/^["'「『【]/, "")             // 左引号
-      .replace(/["'」』】]$/, "")             // 右引号
-      // 新增：移除要素标注（数字+悬念）、（悬念+数字）
-      .replace(/（[^）]*）$/, "")             // 中文括号标注
-      .replace(/\([^)]*\)$/, "");             // 英文括号标注
-
-    // 清理多余空格
-    title = title.replace(/\s+/g, " ").trim();
-
-    // 验证长度（宽松一些）
-    if (title.length >= 4 && title.length <= 60) {
-      // 避免重复
-      if (!titles.includes(title)) {
-        titles.push(title);
-      }
-    }
-
-    if (titles.length >= expectedCount) {
-      break;
-    }
+    if (title.length < 4 || title.length > 60) continue;
+    if (seen.has(title)) continue;
+    seen.add(title);
+    out.push(title);
   }
-
-  // 4. 如果解析失败，打印调试信息
-  if (titles.length === 0) {
-    console.warn(`[03_titles] 解析失败，原始输出:\n${text.substring(0, 500)}...`);
-  }
-
-  return titles;
+  return out;
 }
 
 /**

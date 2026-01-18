@@ -46,6 +46,8 @@ export interface Decisions {
   wechat?: WechatConfig;
   images?: ImageConfig;
   selectedTitle?: string;
+  customTitleNote?: string;     // 自定义标题的备注（可选）
+  regenerateTitles?: boolean;   // 是否重新生成标题
 }
 
 /**

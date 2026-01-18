@@ -19,7 +19,6 @@ import { researchNode } from "./nodes/01_research.node";
 import { ragNode } from "./nodes/02_rag.node";
 import { titlesNode } from "./nodes/03_titles.node";
 import { draftNode } from "./nodes/05_draft.node";
-import { polishNode } from "./nodes/06_polish.node";
 import { rewriteNode } from "./nodes/07_rewrite.node";
 import { confirmImagesNode } from "./nodes/08_confirm.node";
 import { humanizeNode } from "./nodes/09_humanize.node";
@@ -133,7 +132,7 @@ export const interactiveGraph = interactiveTestWorkflow.compile({ checkpointer }
 /**
  * 完整 Article Agent 工作流 (v2)
  *
- * 15 节点完整流程（双重并行优化）:
+ * 14 节点完整流程（双重并行优化，删除 Polish）:
  *
  * 前置流程:
  * START → Gate A (选公众号) → 01_research
@@ -144,7 +143,7 @@ export const interactiveGraph = interactiveTestWorkflow.compile({ checkpointer }
  *                └─→ gate_c_select_title (等待两者完成)
  *
  * 中间流程:
- * gate_c_select_title → 05_draft → 06_polish → 07_rewrite
+ * gate_c_select_title → 05_draft → 07_rewrite
  *
  * 第二层并行（Rewrite 后）:
  *   07_rewrite ─┬─→ 08_confirm → 10_prompts → 11_images → 12_upload
@@ -156,7 +155,7 @@ export const interactiveGraph = interactiveTestWorkflow.compile({ checkpointer }
  *
  * 节点分类:
  * - 交互节点 (3): select_wechat, select_title, confirm
- * - LLM 节点 (7): research, rag, titles, draft, polish, rewrite, humanize, prompts
+ * - LLM 节点 (6): research, rag, titles, draft, rewrite, humanize, prompts
  * - 代码节点 (5): images, upload, html, draftbox, end
  *
  * 设计原则:
@@ -175,7 +174,6 @@ const fullArticleWorkflow = new StateGraph(ArticleAnnotation)
   .addNode("02_rag", ragNode)
   .addNode("03_titles", titlesNode)
   .addNode("05_draft", draftNode)
-  .addNode("06_polish", polishNode)
   .addNode("07_rewrite", rewriteNode)
   .addNode("09_humanize", humanizeNode)
   .addNode("10_prompts", promptsNode)
@@ -204,8 +202,7 @@ const fullArticleWorkflow = new StateGraph(ArticleAnnotation)
   .addEdge("02_rag", "gate_c_select_title")
   .addEdge("03_titles", "gate_c_select_title")
   .addEdge("gate_c_select_title", "05_draft")
-  .addEdge("05_draft", "06_polish")
-  .addEdge("06_polish", "07_rewrite")
+  .addEdge("05_draft", "07_rewrite")
 
   // 并行起点：从 07_rewrite 进入 confirm 节点
   .addEdge("07_rewrite", "08_confirm")       // rewrite → confirm
