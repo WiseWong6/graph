@@ -17,7 +17,7 @@
     "full": "tsx src/cli/index.ts full",
     "step": "tsx src/cli/step-cli.ts",
     "research": "tsx src/cli/research-cli.ts",
-    "test-titles": "tsx src/cli/titles-cli.ts",
+    "test-titles": "tsx src/cli/test-titles.ts",
     "test-research-titles": "tsx scripts/test-research-titles.ts",
     "test-research": "tsx src/agents/article/nodes/test-research.ts",
     "test-search": "tsx src/agents/article/nodes/test-research.ts search",

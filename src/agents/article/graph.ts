@@ -19,14 +19,14 @@ import { researchNode } from "./nodes/01_research.node";
 import { ragNode } from "./nodes/02_rag.node";
 import { titlesNode } from "./nodes/03_titles.node";
 import { draftNode } from "./nodes/05_draft.node";
-import { rewriteNode } from "./nodes/07_rewrite.node";
-import { confirmImagesNode } from "./nodes/08_confirm.node";
-import { humanizeNode } from "./nodes/09_humanize.node";
-import { promptsNode } from "./nodes/10_prompts.node";
-import { imagesNode } from "./nodes/11_images.node";
-import { uploadImagesNode } from "./nodes/12_upload.node";
-import { htmlNode } from "./nodes/13_html.node";
-import { draftboxNode } from "./nodes/14_draftbox.node";
+import { rewriteNode } from "./nodes/06_rewrite.node";
+import { confirmImagesNode } from "./nodes/07_confirm.node";
+import { humanizeNode } from "./nodes/08_humanize.node";
+import { promptsNode } from "./nodes/09_prompts.node";
+import { imagesNode } from "./nodes/10_images.node";
+import { uploadImagesNode } from "./nodes/11_upload.node";
+import { htmlNode } from "./nodes/12_html.node";
+import { draftboxNode } from "./nodes/13_draftbox.node";
 
 /**
  * Checkpoint 配置
@@ -132,7 +132,7 @@ export const interactiveGraph = interactiveTestWorkflow.compile({ checkpointer }
 /**
  * 完整 Article Agent 工作流 (v2)
  *
- * 14 节点完整流程（双重并行优化，删除 Polish）:
+ * 13 节点完整流程（删除 Polish）:
  *
  * 前置流程:
  * START → Gate A (选公众号) → 01_research
@@ -143,20 +143,20 @@ export const interactiveGraph = interactiveTestWorkflow.compile({ checkpointer }
  *                └─→ gate_c_select_title (等待两者完成)
  *
  * 中间流程:
- * gate_c_select_title → 05_draft → 07_rewrite
+ * gate_c_select_title → 05_draft → 06_rewrite
  *
  * 第二层并行（Rewrite 后）:
- *   07_rewrite ─┬─→ 08_confirm → 10_prompts → 11_images → 12_upload
- *               └─→ 09_humanize
- *               └─→ 13_html (汇聚点)
+ *   06_rewrite ─┬─→ 07_confirm → 09_prompts → 10_images → 11_upload
+ *               └─→ 08_humanize
+ *               └─→ 12_html (汇聚点)
  *
  * 后续流程:
- * 13_html → 14_draftbox → end → END
+ * 12_html → 13_draftbox → end → END
  *
  * 节点分类:
  * - 交互节点 (3): select_wechat, select_title, confirm
  * - LLM 节点 (6): research, rag, titles, draft, rewrite, humanize, prompts
- * - 代码节点 (5): images, upload, html, draftbox, end
+ * - 代码节点 (4): images, upload, html, draftbox, end
  *
  * 设计原则:
  * - 每个节点只做一件事
@@ -174,19 +174,19 @@ const fullArticleWorkflow = new StateGraph(ArticleAnnotation)
   .addNode("02_rag", ragNode)
   .addNode("03_titles", titlesNode)
   .addNode("05_draft", draftNode)
-  .addNode("07_rewrite", rewriteNode)
-  .addNode("09_humanize", humanizeNode)
-  .addNode("10_prompts", promptsNode)
+  .addNode("06_rewrite", rewriteNode)
+  .addNode("08_humanize", humanizeNode)
+  .addNode("09_prompts", promptsNode)
 
   // 交互节点
   .addNode("gate_c_select_title", selectTitleNode)
-  .addNode("08_confirm", confirmImagesNode)
+  .addNode("07_confirm", confirmImagesNode)
 
   // 代码节点
-  .addNode("11_images", imagesNode)
-  .addNode("12_upload", uploadImagesNode)
-  .addNode("13_html", htmlNode)
-  .addNode("14_draftbox", draftboxNode)
+  .addNode("10_images", imagesNode)
+  .addNode("11_upload", uploadImagesNode)
+  .addNode("12_html", htmlNode)
+  .addNode("13_draftbox", draftboxNode)
   .addNode("end", endNode)
 
   // 定义流程连接
@@ -201,28 +201,44 @@ const fullArticleWorkflow = new StateGraph(ArticleAnnotation)
   // 两者都完成后，才能选择标题（LangGraph 自动等待所有入边完成）
   .addEdge("02_rag", "gate_c_select_title")
   .addEdge("03_titles", "gate_c_select_title")
-  .addEdge("gate_c_select_title", "05_draft")
-  .addEdge("05_draft", "07_rewrite")
 
-  // 并行起点：从 07_rewrite 进入 confirm 节点
-  .addEdge("07_rewrite", "08_confirm")       // rewrite → confirm
+  // Gate C 条件边：根据用户选择决定下一步
+  // - 如果选择"重新生成标题"：回到 03_titles
+  // - 否则：继续到 05_draft
+  .addConditionalEdges(
+    "gate_c_select_title",
+    (state: typeof ArticleAnnotation.State) => {
+      if (state.decisions?.regenerateTitles) {
+        return "regenerate";
+      }
+      return "continue";
+    },
+    {
+      regenerate: "03_titles",
+      continue: "05_draft"
+    }
+  )
+  .addEdge("05_draft", "06_rewrite")
+
+  // 并行起点：从 06_rewrite 进入 confirm 节点
+  .addEdge("06_rewrite", "07_confirm")       // rewrite → confirm
 
   // confirm 完成后，并行触发 prompts 和 humanize（传递 imageCount）
-  .addEdge("08_confirm", "10_prompts")       // confirm → prompts
-  .addEdge("08_confirm", "09_humanize")      // confirm → humanize（并行执行）
+  .addEdge("07_confirm", "09_prompts")       // confirm → prompts
+  .addEdge("07_confirm", "08_humanize")      // confirm → humanize（并行执行）
 
   // 图片流程：prompts → images → upload
-  .addEdge("10_prompts", "11_images")
-  .addEdge("11_images", "12_upload")
+  .addEdge("09_prompts", "10_images")
+  .addEdge("10_images", "11_upload")
 
   // 汇聚点：html 等待 humanize 和 upload 都完成（严格顺序）
   // 注意：必须将 upload 的边放在 humanize 之前，确保 LangGraph 正确处理
-  .addEdge("12_upload", "13_html")
-  .addEdge("09_humanize", "13_html")
+  .addEdge("11_upload", "12_html")
+  .addEdge("08_humanize", "12_html")
 
   // 后续节点
-  .addEdge("13_html", "14_draftbox")
-  .addEdge("14_draftbox", "end")
+  .addEdge("12_html", "13_draftbox")
+  .addEdge("13_draftbox", "end")
   .addEdge("end", END);
 
 /**

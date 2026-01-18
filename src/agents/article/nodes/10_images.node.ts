@@ -21,7 +21,7 @@ import { createLogger } from "../../../utils/logger.js";
 import { retry } from "../../../utils/errors.js";
 import { parallelMap } from "../../../utils/concurrency.js";
 
-const log = createLogger("11_images");
+const log = createLogger("10_images");
 
 /**
  * Ark API 配置

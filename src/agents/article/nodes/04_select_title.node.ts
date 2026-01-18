@@ -74,18 +74,6 @@ export async function selectTitleNode(
     return {};
   }
 
-  // 检查是否需要重新生成
-  if (state.decisions?.regenerateTitles) {
-    // 清除标志，让流程回到 titles 节点
-    console.log("[select_title] 重新生成标题标志已清除");
-    return {
-      decisions: {
-        ...state.decisions,
-        regenerateTitles: false
-      }
-    };
-  }
-
   const titles = state.titles;
 
   // 检查是否有标题选项

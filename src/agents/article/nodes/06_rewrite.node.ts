@@ -1,14 +1,13 @@
 /**
  * Rewrite 节点 v2 - 使用统一错误处理和日志
  *
- * 职责: 使用智性叙事风格重写润色后的文章
+ * 职责: 使用智性叙事风格重写初稿文章
  *
  * 数据流:
- * polished + researchResult (Brief) + ragContent + selectedTitle → LLM 重写 → rewritten
+ * draft + researchResult (Brief) + ragContent + selectedTitle → LLM 重写 → rewritten
  *
  * 核心差异:
  * - Draft (05): 图书管理员 - 整理资料，生成完整内容
- * - Polish (06): 编辑 - 润色表达，添加金句点缀
  * - Rewrite (07): 跨界智性叙事者 - 深度创作，注入灵魂
  *
  * 设计原则:
@@ -31,7 +30,7 @@ import { ErrorHandler, ValidationError, retry } from "../../../utils/errors.js";
 config({ path: resolve(process.cwd(), ".env") });
 
 // 创建节点日志
-const log = createLogger("07_rewrite");
+const log = createLogger("06_rewrite");
 
 // ========== 类型定义 ==========
 
@@ -68,13 +67,15 @@ export async function rewriteNode(state: ArticleState): Promise<Partial<ArticleS
   log.startStep("validate_input");
 
   // ========== 验证输入 ==========
-  if (!state.polished) {
-    throw new ValidationError("Polished content not found in state", "polished");
+  // 使用 draft 作为输入（Polish 节点已删除）
+  const contentToRewrite = state.draft;
+  if (!contentToRewrite) {
+    throw new ValidationError("Draft content not found in state", "draft");
   }
 
   // ========== 获取标题 ==========
   const title = state.decisions?.selectedTitle || state.titles?.[0] || "无标题";
-  log.completeStep("validate_input", { title, inputLength: state.polished.length });
+  log.completeStep("validate_input", { title, inputLength: contentToRewrite.length });
 
   // ========== 解析 Brief 和 RAG ==========
   log.startStep("parse_input");
@@ -91,7 +92,7 @@ export async function rewriteNode(state: ArticleState): Promise<Partial<ArticleS
 
   // ========== 构建 Prompt ==========
   log.startStep("build_prompt");
-  const prompt = buildRewritePrompt(title, brief, rag, state.polished);
+  const prompt = buildRewritePrompt(title, brief, rag, contentToRewrite);
   log.completeStep("build_prompt", { promptLength: prompt.length });
 
   // ========== 调用 LLM ==========
@@ -127,7 +128,7 @@ export async function rewriteNode(state: ArticleState): Promise<Partial<ArticleS
       mkdirSync(rewriteDir, { recursive: true });
     }
 
-    const rewritePath = join(rewriteDir, "07_rewrite.md");
+    const rewritePath = join(rewriteDir, "06_rewrite.md");
     writeFileSync(rewritePath, rewritten, "utf-8");
 
     log.completeStep("save_output", { path: rewritePath });
@@ -139,12 +140,12 @@ export async function rewriteNode(state: ArticleState): Promise<Partial<ArticleS
     };
   } catch (error) {
     log.failStep("llm_call", error);
-    ErrorHandler.handle(error, "07_rewrite");
+    ErrorHandler.handle(error, "06_rewrite");
 
-    // 降级: 返回润色稿
-    log.warn("Fallback to polished content");
+    // 降级: 返回初稿
+    log.warn("Fallback to draft content");
     return {
-      rewritten: state.polished
+      rewritten: contentToRewrite
     };
   }
 }
