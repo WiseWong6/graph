@@ -32,13 +32,13 @@
 03_titles ✅ | 04_select_title ✅ | 05_draft ✅
 06_rewrite ✅ | 07_confirm ✅ | 08_humanize ✅
 09_prompts ✅ | 10_images ✅ | 11_upload ✅
-12_html ⏳ | 13_draftbox ⏳
+12_html ✅ | 13_draftbox ✅
 ```
 
 **流程说明**:
-- 删除了 polish 节点（Draft → Rewrite 直接连接）
+- **14 个节点全部验收通过** ✅
 - 双重并行：RAG+Titles 并行，Prompts+Humanize 并行
-- 最后 2 节点待验证（HTML + Draftbox）
+- 三大并行优化：搜索并行、图片上传并行、节点并行执行
 
 ---
 
@@ -82,19 +82,54 @@
 ### Images 流程 (09-11)
 - **Prompts (09)**: 5 种风格（infographic/healing/pixar/sokamono/handdrawn）
 - **Images (10)**: Ark API 生图 + 并行生成 + 水印关闭
-- **Upload (11)**: 微信 CDN 并行上传
+- **Upload (11)**: 微信 CDN 并行上传（图文消息图片）
 
 ### HTML 节点 (12)
-- 调用 md-to-wxhtml 技能
-- 降级方案（简单正则转换）
+- markdown-it 解析 Markdown
+- 图片占位符替换为 CDN URL
+- 微信编辑器样式
+- 保存 HTML + Markdown
 
 ### Draftbox 节点 (13)
-- 微信草稿箱发布
-- 支持多账号
+- 上传永久缩略图素材（thumb_media_id 必填）
+- 使用 stable access_token API
+- 发布到微信草稿箱
+- 摘要限制 54 个汉字
+
+---
+
+## 下一步计划
+
+### 1. 端到端验证
+- 运行完整流程：`npm run step`
+- 从主题选择到草稿箱发布
+- 验证所有节点串联正常
+
+### 2. 确保并行操作
+- 验证 RAG + Titles 并行执行
+- 验证 Prompts + Humanize 并行执行
+- 检查并行搜索功能
+- 确认并行图片上传
+
+### 3. 多 LLM 支持
+- Research 节点：DeepSeek
+- Draft/Rewrite 节点：Anthropic
+- Titles 节点：可选配置
+- Humanize 节点：可选配置
 
 ---
 
 ## 变更日志
+
+### 2026-01-19
+- **HTML 节点验收通过**: markdown-it 解析 + 图片替换
+- **Draftbox 节点验收通过**: 永久缩略图素材 + stable token
+- **完整发布流程测试**: `scripts/test-publish-flow.ts`
+- **微信 API 修复**:
+  - 使用 `/cgi-bin/stable_token` 替代旧 API
+  - thumb_media_id 必填（上传永久素材）
+  - 摘要长度限制 54 个汉字
+- **所有 14 个节点验收通过** ✅
 
 ### 2026-01-18
 - **ResumeManager**: 恢复界面显示节点名称
@@ -128,6 +163,7 @@ npm run step -- --resume  # 恢复会话
 npm run test-full         # 完整流程验证
 npm run research          # 交互式调研
 npm run test-interactive  # 图片生成测试
+npm run test-publish-flow # 发布流程测试
 ```
 
 ### RAG 相关
@@ -156,15 +192,16 @@ write-agent/
 │   │       ├── 08_humanize.node.ts       ✅
 │   │       ├── 09_prompts.node.ts        ✅
 │   │       ├── 10_images.node.ts         ✅
-│   │       ├── 11_upload.node.ts         ✅ (state.wechat + File)
+│   │       ├── 11_upload.node.ts         ✅ (stable token)
 │   │       ├── 12_html.node.ts           ✅
-│   │       └── 13_draftbox.node.ts       ✅
+│   │       └── 13_draftbox.node.ts       ✅ (永久素材)
 │   ├── rag/           # RAG 索引管理
 │   ├── adapters/      # LLM/搜索适配器
 │   ├── cli/           # ResumeManager 交互
 │   ├── config/        # 节点配置
 │   └── utils/         # 工具函数
 ├── scripts/           # 测试脚本
+│   └── test-publish-flow.ts  # 发布流程测试
 ├── data/              # RAG 数据
 └── docs/
     └── ARCHITECTURE.md

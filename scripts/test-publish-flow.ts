@@ -65,14 +65,17 @@ async function main() {
   console.log("=== 步骤 0: 读取输入数据 ===");
 
   // 读取 Markdown
-  let markdown = readFileSync(TEST_CONFIG.markdownPath, "utf-8");
-  // 移除所有图片占位符（测试无图片版本）
-  markdown = markdown.replace(/!\[.*?\]\(.*?\)/g, "");
-  console.log(`✅ 读取 Markdown: ${markdown.length} 字符（已移除图片占位符）`);
+  const markdown = readFileSync(TEST_CONFIG.markdownPath, "utf-8");
+  console.log(`✅ 读取 Markdown: ${markdown.length} 字符`);
 
-  // 构造图片路径（先测试无图片版本）
-  const imagePaths: string[] = [];
-  console.log(`✅ 图片路径: ${imagePaths.length} 张（测试无图片版本）\n`);
+  // 构造图片路径
+  const imagePaths = [
+    join(TEST_CONFIG.imagesDir, "image_01.png"),
+    join(TEST_CONFIG.imagesDir, "image_02.png"),
+    join(TEST_CONFIG.imagesDir, "image_03.png"),
+    join(TEST_CONFIG.imagesDir, "image_04.png")
+  ];
+  console.log(`✅ 图片路径: ${imagePaths.length} 张\n`);
 
   // ========== 构造 ArticleState ==========
   const state: ArticleState = {
@@ -90,7 +93,7 @@ async function main() {
       wechat: TEST_CONFIG.wechat,
       images: {
         confirmed: true,
-        count: 0,  // 先测试无图片版本
+        count: 4,
         style: "infographic",
         model: "doubao-seedream-4-5-251128",
         resolution: "2k"
