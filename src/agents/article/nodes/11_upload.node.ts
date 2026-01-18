@@ -152,18 +152,15 @@ async function uploadImage(
  * 获取 access_token
  */
 async function getAccessToken(config: WechatConfig): Promise<string> {
-  const url = `${config.apiUrl}/cgi-bin/token?grant_type=client_credential&appid=${config.appId}&secret=${config.appSecret}`;
-  console.log("[11.5_upload] Token API URL:", url.replace(config.appSecret, "***"));
-  const response = await fetch(url);
+  const response = await fetch(
+    `${config.apiUrl}/cgi-bin/token?grant_type=client_credential&appid=${config.appId}&secret=${config.appSecret}`
+  );
 
   if (!response.ok) {
     throw new Error(`Failed to get access_token: ${response.statusText}`);
   }
 
   const data = await response.json() as { access_token: string; errcode?: number; errmsg?: string };
-
-  // 打印完整响应用于调试
-  console.log("[11.5_upload] Token API response:", JSON.stringify(data));
 
   if (data.errcode && data.errcode !== 0) {
     throw new Error(`Failed to get access_token: ${data.errmsg} (errcode: ${data.errcode})`);

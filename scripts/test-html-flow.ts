@@ -132,12 +132,12 @@ async function step2_uploadImages(imagePaths: string[]): Promise<string[]> {
   print("cyan", "  步骤 2: 上传图片到微信 CDN (图文消息图片)\n");
   print("cyan", "=".repeat(60) + "\n\n");
 
-  const appId = process.env.WECHAT_APP_ID;
-  const appSecret = process.env.WECHAT_APP_SECRET;
+  const appId = process.env.WECHAT_APP_ID_1;
+  const appSecret = process.env.WECHAT_APP_SECRET_1;
 
   if (!appId || !appSecret) {
     print("yellow", "⚠️ 未配置微信 API，跳过上传\n");
-    print("gray", "提示: 设置 WECHAT_APP_ID 和 WECHAT_APP_SECRET\n");
+    print("gray", "提示: 设置 WECHAT_APP_ID_1 和 WECHAT_APP_SECRET_1\n");
     return [];
   }
 
@@ -165,10 +165,10 @@ async function step2_uploadImages(imagePaths: string[]): Promise<string[]> {
       // 读取图片
       const imageBuffer = readFileSync(imagePath);
 
-      // 构建 FormData (图文消息图片上传)
+      // 构建 FormData - 使用原生 File 构造函数 (Node.js 20+)
       const formData = new FormData();
-      const blob = new Blob([imageBuffer]);
-      formData.append("media", blob);
+      const file = new File([imageBuffer], "image.png", { type: "image/png" });
+      formData.append("media", file);
 
       // 上传图文消息图片
       const uploadResponse = await fetch(
@@ -176,6 +176,7 @@ async function step2_uploadImages(imagePaths: string[]): Promise<string[]> {
         {
           method: "POST",
           body: formData
+          // 不设置 Content-Type，让 fetch 自动添加 boundary
         }
       );
 
@@ -205,6 +206,13 @@ async function step3_convertToHtml(markdown: string, imageUrls: string[]): Promi
 
   print("gray", "图片 URL 数量: " + imageUrls.length + "\n");
 
+  // 如果没有上传成功的图片，移除 Markdown 中的图片引用
+  let processedMarkdown = markdown;
+  if (imageUrls.length === 0) {
+    print("yellow", "⚠️ 没有上传成功的图片，移除 Markdown 中的图片引用\n");
+    processedMarkdown = markdown.replace(/!\[.*?\]\(.*?\)/g, "");
+  }
+
   const tempDir = join(process.cwd(), "output", "html-flow-test");
 
   // 方案 1: 使用 md-to-wxhtml 技能（需要在 Claude Code 环境）
@@ -215,7 +223,7 @@ async function step3_convertToHtml(markdown: string, imageUrls: string[]): Promi
   try {
     const { execSync } = await import("child_process");
     const tempMdPath = join(tempDir, "_temp.md");
-    writeFileSync(tempMdPath, markdown, "utf-8");
+    writeFileSync(tempMdPath, processedMarkdown, "utf-8");
 
     const result = execSync(
       `claude skill run md-to-wxhtml "${tempMdPath}"`,
@@ -233,7 +241,7 @@ async function step3_convertToHtml(markdown: string, imageUrls: string[]): Promi
     print("yellow", "⚠️ 技能不可用，使用改进的降级方案\n");
 
     // 改进的降级方案：更接近微信编辑器格式
-    html = convertMarkdownToWxHtml(markdown, imageUrls);
+    html = convertMarkdownToWxHtml(processedMarkdown, imageUrls);
   }
 
   // 保存 HTML
@@ -365,8 +373,8 @@ async function step4_publishToDraftbox(html: string, title: string): Promise<voi
   print("cyan", "  步骤 4: 发布到微信草稿箱\n");
   print("cyan", "=".repeat(60) + "\n\n");
 
-  const appId = process.env.WECHAT_APP_ID;
-  const appSecret = process.env.WECHAT_APP_SECRET;
+  const appId = process.env.WECHAT_APP_ID_1;
+  const appSecret = process.env.WECHAT_APP_SECRET_1;
 
   if (!appId || !appSecret) {
     print("yellow", "⚠️ 未配置微信 API，跳过发布\n");
@@ -412,8 +420,10 @@ async function step4_publishToDraftbox(html: string, title: string): Promise<voi
 
   const result = await response.json();
 
+  print("gray", `API 响应: ${JSON.stringify(result, null, 2)}\n`);
+
   if (result.errcode) {
-    print("red", `❌ 发布失败: ${result.errmsg}\n`);
+    print("red", `❌ 发布失败 (errcode: ${result.errcode}): ${result.errmsg}\n`);
   } else {
     print("green", `✅ 发布成功！\n`);
     print("gray", `media_id: ${result.media_id}\n`);
@@ -430,7 +440,7 @@ async function main() {
 
   // 环境检查
   const hasArkKey = !!(process.env.ARK_API_KEY || process.env.VOLCENGINE_API_KEY);
-  const hasWechatKey = !!(process.env.WECHAT_APP_ID && process.env.WECHAT_APP_SECRET);
+  const hasWechatKey = !!(process.env.WECHAT_APP_ID_1 && process.env.WECHAT_APP_SECRET_1);
 
   print("yellow", "环境检查:\n");
   print("gray", `  ARK_API_KEY: ${hasArkKey ? "✅" : "❌ 未设置"}\n`);

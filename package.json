@@ -32,6 +32,7 @@
     "test-full-pipeline": "tsx scripts/test-full-image-pipeline.ts",
     "test-interactive": "tsx scripts/test-interactive.ts",
     "test-html-flow": "tsx scripts/test-html-flow.ts",
+    "test-resume": "tsx scripts/test-resume-manager.ts",
     "test": "vitest",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
@@ -78,6 +79,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/form-data": "^2.2.1",
     "@types/inquirer": "^9.0.7",
     "@types/js-yaml": "^4.0.9",

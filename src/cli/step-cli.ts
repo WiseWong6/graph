@@ -12,13 +12,12 @@
  *   npm run step -- --resume
  */
 
-import { readdir } from "fs/promises";
-import { join } from "path";
 import readline from "readline";
 import chalk from "chalk";
 import ora from "ora";
 import { fullArticleGraph } from "../agents/article/graph.js";
 import type { ArticleState } from "../agents/article/state.js";
+import { ResumeManager } from "./resume-manager.js";
 
 // 节点信息映射
 const NODE_INFO: Record<string, { name: string; description: string; hasOutput: boolean; isInteractive: boolean }> = {
@@ -252,19 +251,6 @@ async function showFullOutput(nodeName: string, state: ArticleState): Promise<vo
 }
 
 /**
- * 列出可恢复的检查点
- */
-async function listCheckpoints(): Promise<string[]> {
-  const checkpointDir = join(process.cwd(), "src", "checkpoints", "article");
-  try {
-    const files = await readdir(checkpointDir);
-    return files.filter(f => f.endsWith(".db"));
-  } catch {
-    return [];
-  }
-}
-
-/**
  * 用户输入主题
  */
 async function promptForTopic(): Promise<string> {
@@ -293,37 +279,54 @@ export async function main() {
   const args = process.argv.slice(2);
   const resume = args.includes("--resume");
 
-  // 从参数获取主题，如果没有则提示用户输入
-  let prompt = args.find(a => !a.startsWith("--"));
+  console.log(chalk.cyan.bold("\n╔══════════════════════════════════════════════════════════╗"));
+  console.log(chalk.cyan.bold("║   步进式文章创作工作流 - Write Agent Step CLI          ║"));
+  console.log(chalk.cyan.bold("╚══════════════════════════════════════════════════════════╝\n"));
 
-  if (!prompt) {
-    console.log(chalk.cyan.bold("\n╔══════════════════════════════════════════════════════════╗"));
-    console.log(chalk.cyan.bold("║   步进式文章创作工作流 - Write Agent Step CLI          ║"));
-    console.log(chalk.cyan.bold("╚══════════════════════════════════════════════════════════╝\n"));
-    prompt = await promptForTopic();
+  let prompt: string;
+  let threadId: string;
+
+  // 恢复模式
+  if (resume) {
+    const manager = new ResumeManager(fullArticleGraph);
+
+    // 选择 thread
+    const selectedThreadId = await manager.selectThread();
+    if (!selectedThreadId) {
+      // 用户选择新建会话
+      prompt = await promptForTopic();
+      threadId = `step-article-${Date.now()}`;
+    } else {
+      threadId = selectedThreadId;
+
+      // 选择 checkpoint
+      const checkpointId = await manager.selectCheckpoint(threadId);
+      if (!checkpointId) {
+        // 用户选择返回，重新选择 thread
+        return main();
+      }
+
+      // 恢复执行
+      console.log("");
+      const spinner = ora("初始化工作流...").start();
+      spinner.succeed("工作流已就绪");
+
+      await manager.resume(threadId, checkpointId);
+      return;
+    }
   } else {
-    console.log(chalk.cyan.bold("\n╔══════════════════════════════════════════════════════════╗"));
-    console.log(chalk.cyan.bold("║   步进式文章创作工作流 - Write Agent Step CLI          ║"));
-    console.log(chalk.cyan.bold("╚══════════════════════════════════════════════════════════╝\n"));
+    // 新建流程
+    // 从参数获取主题，如果没有则提示用户输入
+    const argPrompt = args.find(a => !a.startsWith("--"));
+    prompt = argPrompt || await promptForTopic();
+    threadId = `step-article-${Date.now()}`;
   }
 
   console.log(chalk.gray("主题: ") + chalk.white(prompt));
   console.log(chalk.gray("模式: ") + chalk.yellow(resume ? "恢复模式" : "新建流程"));
 
-  if (resume) {
-    const checkpoints = await listCheckpoints();
-    if (checkpoints.length > 0) {
-      console.log(chalk.gray("\n可用的检查点:"));
-      checkpoints.forEach(cp => console.log(chalk.gray(`  - ${cp}`)));
-    }
-  }
-
   console.log("");
   const spinner = ora("初始化工作流...").start();
-
-  const threadId = resume
-    ? `article-${Date.now()}`
-    : `step-article-${Date.now()}`;
 
   const config = {
     configurable: { thread_id: threadId }
