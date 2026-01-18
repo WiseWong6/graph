@@ -5,7 +5,9 @@
       "mcp__web-reader__webReader",
       "mcp__zread__get_repo_structure",
       "mcp__zread__read_file",
-      "mcp__zread__search_doc"
+      "mcp__zread__search_doc",
+      "Skill(wechat-draftbox)",
+      "Skill(article-workflow)"
     ]
   }
 }

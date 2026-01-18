@@ -106,85 +106,93 @@ models:
   # 节点名称对应工作流中的节点标识
   # -------------------------------------------------------------------------
   nodes:
-    # 基础节点：使用 DeepSeek
+    # 基础节点：使用 DeepSeek Reasoner
     simple_llm:
       provider: deepseek
-      model: deepseek-chat
-      base_url: https://api.deepseek.com/v1
+      model: deepseek-reasoner
+      base_url: https://api.deepseek.com
       api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 1024
         temperature: 0.7
+      timeout: 120  # seconds (Reasoner needs more time)
 
     # 研究节点：使用经济型模型进行资料收集
     research:
       provider: deepseek
-      model: deepseek-chat
-      base_url: https://api.deepseek.com/v1
+      model: deepseek-reasoner
+      base_url: https://api.deepseek.com
       api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 8192  # 增加以确保完整 JSON 输出
         temperature: 0.3  # 降低随机性，确保准确性
+      timeout: 180  # seconds (research needs more time)
 
     # 起草节点：使用强模型进行内容创作
     draft:
       provider: deepseek
-      model: deepseek-chat
-      base_url: https://api.deepseek.com/v1
+      model: deepseek-reasoner
+      base_url: https://api.deepseek.com
       api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 8192
         temperature: 0.8  # 提高创造性
+      timeout: 180  # seconds
 
     # 润色节点：使用中等模型进行内容优化
     polish:
       provider: deepseek
-      model: deepseek-chat
-      base_url: https://api.deepseek.com/v1
+      model: deepseek-reasoner
+      base_url: https://api.deepseek.com
       api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 4096
         temperature: 0.5
+      timeout: 120  # seconds
 
     # 重写节点：使用最强模型进行智性叙事重写
     rewrite:
       provider: deepseek
-      model: deepseek-chat
-      base_url: https://api.deepseek.com/v1
+      model: deepseek-reasoner
+      base_url: https://api.deepseek.com
       api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 8192
         temperature: 0.9  # 高创造性，激发跨界思考
+      timeout: 180  # seconds
 
     # 人化节点：去除 AI 味，增加活人感
     humanize:
       provider: deepseek
-      model: deepseek-chat
-      base_url: https://api.deepseek.com/v1
+      model: deepseek-reasoner
+      base_url: https://api.deepseek.com
       api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 8192
         temperature: 0.8  # 较高温度，增加自然表达
+      timeout: 120  # seconds
 
     # 标题生成节点：使用经济型模型
     title_gen:
       provider: deepseek
-      model: deepseek-chat
-      base_url: https://api.deepseek.com/v1
+      model: deepseek-reasoner
+      base_url: https://api.deepseek.com
       api_key_env: DEEPSEEK_API_KEY
       params:
-        max_tokens: 1024
+        max_tokens: 2048  # 增加以支持生成 8 个标题
         temperature: 0.9  # 高创造性
+      timeout: 180  # seconds
 
     # 图片提示词生成节点
     image_prompt:
       provider: deepseek
-      model: deepseek-chat
-      base_url: https://api.deepseek.com/v1
+      model: deepseek-reasoner
+      base_url: https://api.deepseek.com
       api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 2048
         temperature: 0.7
+      timeout: 120  # seconds
 
     # 图片生成节点（如使用 DALL-E）
     image_gen:
@@ -200,42 +208,46 @@ models:
     # HTML 转换节点：使用经济型模型
     html_convert:
       provider: deepseek
-      model: deepseek-chat
-      base_url: https://api.deepseek.com/v1
+      model: deepseek-reasoner
+      base_url: https://api.deepseek.com
       api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 16384  # 长文档需要更多 token
         temperature: 0.1  # 几乎确定性，保持格式
+      timeout: 240  # seconds (long document)
 
     # 最终审核节点：使用最强模型确保质量
     review:
       provider: deepseek
-      model: deepseek-chat
-      base_url: https://api.deepseek.com/v1
+      model: deepseek-reasoner
+      base_url: https://api.deepseek.com
       api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 2048
         temperature: 0.3
+      timeout: 120  # seconds
 
     # 新增：测试节点 2（使用快速模型）
     simple_llm_2:
       provider: deepseek
-      model: deepseek-chat
-      base_url: https://api.deepseek.com/v1
+      model: deepseek-reasoner
+      base_url: https://api.deepseek.com
       api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 300
         temperature: 0.3
+      timeout: 120  # seconds
 
     # 新增：测试节点 3（使用创意模型）
     simple_llm_3:
       provider: deepseek
-      model: deepseek-chat
-      base_url: https://api.deepseek.com/v1
+      model: deepseek-reasoner
+      base_url: https://api.deepseek.com
       api_key_env: DEEPSEEK_API_KEY
       params:
         max_tokens: 500
         temperature: 0.9
+      timeout: 120  # seconds
 
 # -----------------------------------------------------------------------------
 # Prompt 模板
