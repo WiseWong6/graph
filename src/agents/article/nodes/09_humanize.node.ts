@@ -55,8 +55,10 @@ export async function humanizeNode(state: ArticleState): Promise<Partial<Article
 
   // ========== 构建 Prompt ==========
   log.startStep("build_prompt");
-  const prompt = buildHumanizePrompt(input);
-  log.completeStep("build_prompt", { promptLength: prompt.length });
+  // 从 confirm 节点获取用户确认的图片数量
+  const imageCount = state.decisions?.images?.count || 0;
+  const prompt = buildHumanizePrompt(input, imageCount);
+  log.completeStep("build_prompt", { promptLength: prompt.length, imageCount });
 
   // ========== 调用 LLM ==========
   log.startStep("llm_call");
@@ -116,8 +118,8 @@ export async function humanizeNode(state: ArticleState): Promise<Partial<Article
 /**
  * 构建人化 Prompt
  */
-function buildHumanizePrompt(content: string): string {
-  return `请对以下文章进行"去机械化"处理，同时完成格式清洗和风格重写：
+function buildHumanizePrompt(content: string, imageCount: number): string {
+  let prompt = `请对以下文章进行"去机械化"处理，同时完成格式清洗和风格重写：
 
 ${content}
 
@@ -155,8 +157,42 @@ ${content}
 - **链接**：保留 URL 和链接文本
 - **图片**：保留图片标记和描述
 - **核心观点**：保持原意，只改表达
+`;
+
+  // 添加图片插入指导
+  if (imageCount > 0) {
+    prompt += `
+
+## 图片插入要求
+文章中共有 ${imageCount} 张配图，请在合适的位置插入图片占位符：
+- 使用 Markdown 语法：\`![配图描述](索引)\`
+- 索引从 0 开始：\`![配图1](0)\`、\`![配图2](1)\`、\`![配图3](2)\`
+- 建议在每个核心段落后插入一张配图
+- 配图描述应该简洁有力，能够呼应段落内容
+- 确保索引不超过 ${imageCount - 1}
+
+示例：
+\`\`\`markdown
+这是第一段内容...
+
+![核心概念图解](0)
+
+这是第二段内容...
+
+![实践案例](1)
+
+这是结论...
+
+![总结示意图](2)
+\`\`\`
+`;
+  }
+
+  prompt += `
 
 请直接输出处理后的完整文章，使用 Markdown 格式。`;
+
+  return prompt;
 }
 
 /**

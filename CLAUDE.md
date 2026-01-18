@@ -33,6 +33,8 @@
 | HTML 转换 | ✅ 完成 | 2026-01-18 | Markdown → 微信编辑器格式 |
 | 草稿箱发布 | ✅ 完成 | 2026-01-18 | 微信 API 集成 |
 | 完整工作流 | ✅ 完成 | 2026-01-18 | 15 节点全链路 |
+| **双重并行优化** | ✅ 完成 | 2026-01-18 | RAG+Titles 并行 + 文本/图片并行 |
+| **编译错误修复** | ✅ 完成 | 2026-01-18 | LanceDB 向量存储类型修复 |
 
 ---
 
@@ -134,6 +136,24 @@
   - Polish: Anthropic Sonnet (平衡)
 - [x] 节点级配置覆盖
 
+### 双重并行优化 ✅
+
+**第一层并行（Research 后）**:
+- [x] 02_rag 和 03_titles 同时启动
+- [x] 两者完成后才进入 select_title
+- [x] 时间节省: max(T02, T03) vs T02 + T03
+
+**第二层并行（Rewrite 后）**:
+- [x] 图片分支: 08_confirm → 10_prompts → 11_images → 12_upload
+- [x] 文本分支: 09_humanize（等待 confirm 结果）
+- [x] 汇聚点: 13_html（等待 humanize 和 upload）
+- [x] 时间节省: prompts/humanize 并行执行
+
+**IndexManager 优化**:
+- [x] 幂等性保护（indicesLoaded 标志）
+- [x] 并发加载保护（loadPromise 锁）
+- [x] 防止重复加载索引
+
 ### Titles 节点 ✅
 
 **标题生成**:
@@ -205,41 +225,66 @@ npm run build-indices     # 构建向量索引（待网络恢复）
 
 ## 下一步计划
 
-### P0 - 必须完成
+### 当前阶段：节点单点验证（2026-01-18）
 
-1. **RAG 索引构建** ⚠️ 阻塞
-   - 当前问题：网络不稳定，无法下载嵌入模型
-   - 备选方案：切换到 OpenAI Embedding API
-   - 影响：Titles 节点无法检索参考标题
+**状态**: 索引已构建完毕 ✅
 
-2. **完整流程端到端测试**
-   - 使用真实文章验证 15 节点全链路
-   - 调优各节点 Prompt
-   - 修复发现的 bug
+**验证计划**:
 
-### P1 - 质量提升
+| 阶段 | 节点 | 验证内容 | 状态 |
+|------|------|----------|------|
+| **阶段1** | 00_select_wechat | 公众号选择交互 | ✅ 完成 |
+| | 01_research | Tavily 搜索 + Brief 生成 | ✅ 完成 |
+| | 02_rag | 向量检索返回内容 | 🔧 修复中 |
+| | 03_titles | 生成 8 个候选标题 | ✅ 完成 |
+| | 04_select_title | 用户选择标题交互 | ✅ 完成 |
+| **阶段2** | 05_draft | Research+RAG → 文章 | 待验证 |
+| | 06_polish | 语言优化效果 | 待验证 |
+| | 07_rewrite | 智性叙事转换 | 待验证 |
+| **阶段3** | 08_confirm | 图片数量确认 | 待验证 |
+| | 09_humanize | 去 AI 味效果 | 待验证 |
+| | 10_prompts | 5种风格提示词生成 | 待验证 |
+| | 11_images | Ark API 生图 | 待验证 |
+| | 12_upload | 微信 CDN 上传 | 待验证 |
+| | 13_html | Markdown → HTML | 待验证 |
+| | 14_draftbox | 微信草稿箱发布 | 待验证 |
 
-3. **Prompt 优化**
-   - 各节点 Prompt 迭代优化
-   - 基于真实案例调优
-   - A/B 测试不同版本
+### 验证命令
+```bash
+npm run step          # 单步交互式验证
+npm run test-full     # 完整流程验证
+```
 
-4. **错误处理增强**
-   - 各节点降级策略完善
-   - 用户友好的错误提示
-   - 重试机制优化
+---
 
-### P2 - 体验优化
+### 已修复问题 ✅（2026-01-18）
 
-5. **CLI 体验**
-   - 进度条显示
-   - 彩色输出优化
-   - 交互确认简化
+1. **RAG Formatter 崩溃** ✅
+   - 添加 `data.quotes &&`、`data.articles &&` 防御性检查
+   - 添加 `a.content &&`、`a.metadata?.` 防御性检查
 
-6. **性能优化**
-   - 并发控制调优
-   - 缓存机制
-   - 流式输出
+2. **标题解析失败** ✅
+   - 增强 Prompt 容错性（添加正确/禁止示例）
+   - 改进 `parseTitles()` 容错（移除编号、符号过滤）
+
+3. **搜索超时问题** ✅
+   - 超时从 8 秒增加到 30 秒
+   - 删除 DuckDuckGo 搜索策略（不稳定）
+
+4. **DeepSeek 流式输出** ✅
+   - 所有 DeepSeek 模型启用流式输出
+   - 思考过程 + 最终回答逐字显示
+
+5. **流式输出后换行** ✅
+   - 确保 output 结束后换行，避免日志混在一起
+
+6. **title_gen max_tokens** ✅
+   - 从 1024 增加到 2048（支持生成 8 个标题）
+
+7. **step-cli 交互时机错误** ✅ (2026-01-18)
+   - 只在交互式节点后暂停
+   - 非 LLM 节点不再打断流式输出
+   - 添加 `isInteractive` 标志区分节点类型
 
 ---
 
@@ -257,6 +302,9 @@ npm run build-indices     # 构建向量索引（待网络恢复）
 - [x] Draftbox 节点实现
 - [x] test-interactive 缺少 user message bug
 - [x] Images 节点水印问题
+- [x] LanceDB 向量存储类型错误（@ts-ignore + AsyncGenerator 修复）
+- [x] IndexManager 并发安全问题（幂等性保护）
+- [x] Set 迭代 TypeScript 错误（Array.from 替换）
 
 ### 待解决
 - [ ] RAG 嵌入模型网络问题（可切换 OpenAI API）
@@ -278,13 +326,13 @@ write-agent/
 │   │   │   ├── 05_draft.node.ts          ✅
 │   │   │   ├── 06_polish.node.ts         ✅
 │   │   │   ├── 07_rewrite.node.ts        ✅
-│   │   │   ├── 08_humanize.node.ts       ✅
-│   │   │   ├── 09_confirm_images.node.ts ✅
+│   │   │   ├── 08_confirm.node.ts        ✅ (原 09_confirm_images)
+│   │   │   ├── 09_humanize.node.ts       ✅ (原 08_humanize)
 │   │   │   ├── 10_prompts.node.ts        ✅
 │   │   │   ├── 11_images.node.ts         ✅
-│   │   │   ├── 11.5_upload_images.node.ts ✅
-│   │   │   ├── 12_html.node.ts           ✅
-│   │   │   └── 13_draftbox.node.ts       ✅
+│   │   │   ├── 12_upload.node.ts         ✅ (原 11.5_upload_images)
+│   │   │   ├── 13_html.node.ts           ✅ (原 12_html)
+│   │   │   └── 14_draftbox.node.ts       ✅ (原 13_draftbox)
 │   ├── rag/                              ✅
 │   ├── adapters/                         ✅
 │   ├── cli/                              ✅
@@ -295,6 +343,15 @@ write-agent/
 └── docs/
     └── ARCHITECTURE.md                   ✅
 ```
+
+**重构说明 (2026-01-18)**:
+- 去除小数编号 (`11.5` → `12`)
+- 调整节点顺序 (`confirm` 提前到 08)
+- 实现双重并行处理优化:
+  - 第一层: Research 后 RAG + Titles 并行
+  - 第二层: Rewrite 后 prompts + humanize 并行
+- IndexManager 幂等性保护
+- LanceDB 类型错误修复
 
 ---
 

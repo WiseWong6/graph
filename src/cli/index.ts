@@ -82,11 +82,17 @@ program
 // 完整流程命令 (v2 新增)
 program
   .command("full")
-  .description("Run full article workflow (14 nodes)")
-  .option("--prompt <string>", "Article topic/prompt")
+  .description("Run full article workflow (15 nodes)")
+  .option("--prompt <string>", "Article topic/prompt (required)")
   .option("--resume", "Resume from checkpoint")
   .option("--output <path>", "Output directory")
   .action(async (options) => {
+    if (!options.prompt) {
+      console.error("错误: 必须提供 --prompt 参数");
+      console.error("示例: npm run full -- --prompt '写一篇关于 AI Agent 的文章'");
+      process.exit(1);
+    }
+
     const { fullArticleGraph } = await import("../agents/article/graph.js");
 
     const config = {
@@ -94,10 +100,10 @@ program
     };
 
     console.log("=== 完整 Article Agent Workflow ===");
-    console.log(`提示: ${options.prompt || "AI Agent 的最新进展"}\n`);
+    console.log(`提示: ${options.prompt}\n`);
 
     const result = await fullArticleGraph.invoke(
-      { prompt: options.prompt || "AI Agent 的最新进展" },
+      { prompt: options.prompt },
       config
     );
 
@@ -106,6 +112,17 @@ program
     console.log("主题:", result.topic);
     console.log("选中标题:", result.decisions?.selectedTitle);
     console.log("输出目录:", result.outputPath);
+  });
+
+// 步进模式命令 (新增)
+program
+  .command("step")
+  .description("Run step-by-step interactive workflow")
+  .option("--prompt <string>", "Article topic/prompt")
+  .option("--resume", "Resume from checkpoint")
+  .action(async (_options) => {
+    const { main } = await import("./step-cli.js");
+    await main();
   });
 
 program.parse();

@@ -9,20 +9,26 @@ Write Agent is a LangGraph.js-based multi-agent content generation system with r
 ### Agents (`src/agents/`)
 
 - **Article Agent**: End-to-end article generation workflow
+  - `00_select_wechat.node.ts` - Interactive WeChat account selection
   - `01_research.node.ts` - Research & Brief generation
   - `02_rag.node.ts` - RAG-based content enhancement
-  - `03_titles.node.ts` - Title generation (planned)
+  - `03_titles.node.ts` - Title generation
   - `04_select_title.node.ts` - Interactive title selection
   - `05_draft.node.ts` - Draft generation (RAG-enhanced)
   - `06_polish.node.ts` - Language refinement
-  - `07_rewrite.node.ts` - **Intellectual narrative rewrite** (NEW)
-  - `08_humanize.node.ts` - Humanize content (planned)
-  - `09_confirm_images.node.ts` - Interactive image configuration
-  - `10_prompts.node.ts` - Image prompts generation (planned)
-  - `11_images.node.ts` - Image generation (planned)
-  - `11.5_upload_images.node.ts` - Image upload (planned)
-  - `12_html.node.ts` - HTML conversion (planned)
-  - `13_draftbox.node.ts` - Draftbox publishing (planned)
+  - `07_rewrite.node.ts` - **Intellectual narrative rewrite**
+  - `08_confirm.node.ts` - Interactive image configuration
+  - `09_humanize.node.ts` - Humanize content (with image placeholders)
+  - `10_prompts.node.ts` - Image prompts generation (based on draft)
+  - `11_images.node.ts` - Image generation (Ark API)
+  - `12_upload.node.ts` - Image upload to WeChat CDN
+  - `13_html.node.ts` - HTML conversion (markdown → WeChat format)
+  - `14_draftbox.node.ts` - Draftbox publishing
+
+**Parallel Execution Design:**
+- Text branch: `07_rewrite → 09_humanize → 13_html`
+- Image branch: `08_confirm → 10_prompts → 11_images → 12_upload → 13_html`
+- Convergence: `13_html` waits for both `09_humanize` and `12_upload`
 
 ### Adapters (`src/adapters/`)
 
@@ -62,58 +68,71 @@ Write Agent is a LangGraph.js-based multi-agent content generation system with r
 ```
 User Input (CLI)
     ↓
-Research Node (01_research)
-    ├─→ Input Detection (type, complexity)
-    ├─→ Parallel Search (Firecrawl + WebResearch)
-    │   └─→ Merge & Deduplicate
-    ├─→ LLM Analysis (DeepSeek)
-    │   ├─→ Extract Insights
-    │   ├─→ Build Framework
-    │   ├─→ Generate Angles
-    │   └─→ Recommend Best Angle
-    └─→ Brief Generation
-        ├─→ 00_brief.md (Markdown)
-        └─→ 00_handoff.yaml (YAML)
+┌─────────────────────────────────────────────────────────────────┐
+│                    Phase 1: Sequential Setup                    │
+├─────────────────────────────────────────────────────────────────┤
+│ START → Gate A (select_wechat) → 01_research                    │
+└─────────────────────────────────────────────────────────────────┘
     ↓
-RAG Node (02_rag) ⚠️ Pending index construction
-    ├─→ Load IndexManager (Golden Quotes + Articles + Titles)
-    ├─→ Extract Keywords from Brief
-    ├─→ Parallel Retrieval (Vector + BM25)
-    │   ├─→ Quotes (37,420 entries)
-    │   ├─→ Articles (6,975 entries)
-    │   └─→ Titles (6,975 entries)
-    └─→ RAG Content Generation
-        └─→ 01_rag_content.md
+┌─────────────────────────────────────────────────────────────────┐
+│              Phase 2: First Parallel Layer (NEW!)               │
+├─────────────────────────────────────────────────────────────────┤
+│  01_research completes, splits into two branches:              │
+│                                                                  │
+│  Branch 1 (RAG):                                                │
+│    01_research → 02_rag ─────────────────────────┐              │
+│                                                  │              │
+│  Branch 2 (Titles):                              │              │
+│    01_research → 03_titles ──────────────────────┤              │
+│                                                  ├─→ Gate C     │
+│  LangGraph waits for BOTH to complete ──────────┘   (select_    │
+│                                                 title)         │
+└─────────────────────────────────────────────────────────────────┘
     ↓
-Titles Node (03_titles) ⚠️ Planned
-    └─→ Generate 5-10 title options
+┌─────────────────────────────────────────────────────────────────┐
+│                   Phase 3: Sequential Processing                │
+├─────────────────────────────────────────────────────────────────┤
+│ Gate C → 05_draft → 06_polish → 07_rewrite                     │
+└─────────────────────────────────────────────────────────────────┘
     ↓
-Select Title Gate (04_select_title)
-    └─→ Interactive title selection
+┌─────────────────────────────────────────────────────────────────┐
+│             Phase 4: Second Parallel Layer (UPDATED!)            │
+├─────────────────────────────────────────────────────────────────┤
+│  07_rewrite completes, splits into two branches:               │
+│                                                                  │
+│  Branch 1 (Image Pipeline):                                     │
+│    07_rewrite → 08_confirm ─┬─→ 10_prompts (based on draft)     │
+│                            │    → 11_images → 12_upload         │
+│                            │                                     │
+│  Branch 2 (Text Processing):                                    │
+│    07_rewrite → 09_humanize ←─┘ (uses imageCount from confirm)  │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
     ↓
-Draft Node (05_draft)
-    ├─→ Parse Brief (insights, framework, angles)
-    ├─→ Parse RAG (quotes, articles, titles)
-    └─→ Structured draft generation
-        └─→ 05_draft.md
-    ↓
-Polish Node (06_polish)
-    ├─→ Language refinement
-    ├─→ Paragraph optimization
-    └─→ Grammar correction
-        └─→ 06_polished.md
-    ↓
-Rewrite Node (07_rewrite) ✅ NEW
-    ├─→ Intellectual narrative style
-    ├─→ Four-step flow: Break cognition → Popular deconstruction → Cross-disciplinary lift → Philosophical outro
-    ├─→ IPS principles: Intellectual + Polymath + Simple
-    └─→ HKR self-check: Hook + Knowledge + Resonance
-        └─→ 07_rewrite.md
-    ↓
-[Future: Humanize → Images → Upload → HTML → Draftbox]
+┌─────────────────────────────────────────────────────────────────┐
+│                       Convergence Phase                         │
+├─────────────────────────────────────────────────────────────────┤
+│  09_humanize + 12_upload ──→ 13_html → 14_draftbox → END       │
+│                                                                  │
+│  (html node replaces image placeholders with CDN URLs)          │
+└─────────────────────────────────────────────────────────────────┘
     ↓
 Output Directory
 ```
+
+**Key Optimization Points:**
+
+**First Parallel Layer (Research → RAG/Titles):**
+- `02_rag` and `03_titles` start simultaneously after `01_research` completes
+- Both nodes can load IndexManager indices (protected by idempotency)
+- LangGraph automatically waits for both before proceeding to `04_select_title`
+- **Time saved**: min(T02, T03)
+
+**Second Parallel Layer (Rewrite → Image/Text):**
+- `10_prompts` uses `draft` (not `humanized`) → can run in parallel with `09_humanize`
+- `09_humanize` inserts image placeholders based on `state.decisions.images.count`
+- `13_html` replaces placeholders with actual CDN URLs from `12_upload`
+- **Time saved**: T09 (humanize runs while image pipeline processes)
 
 ## Research Brief Structure
 
@@ -198,15 +217,17 @@ data/
 - RAG node implementation (code complete)
 - Draft node with Brief/RAG parsing
 - Polish node for language refinement
-- **Rewrite node for intellectual narrative** (NEW)
+- Rewrite node for intellectual narrative
+- **Full 15-node workflow with dual parallel optimization** (UPDATED)
+  - First parallel layer: RAG + Titles after Research
+  - Second parallel layer: prompts + humanize after Rewrite
+- **IndexManager idempotency protection** (NEW)
+- **LanceDB vector store TypeScript fixes** (NEW)
 
 ⚠️ **Pending:**
 - Vector index construction (network issue, requires manual run when network is stable)
 
 📋 **Planned:**
-- Titles generation node
-- Humanize node
-- Image generation and upload
-- HTML conversion
-- Draftbox publishing
-- Full workflow integration
+- Workflow end-to-end testing
+- Prompt optimization based on real usage
+- Error handling enhancements

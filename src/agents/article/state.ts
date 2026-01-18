@@ -31,7 +31,10 @@ export interface ImageConfig {
  * 用于 Gate A (select_wechat) 交互节点
  */
 export interface WechatConfig {
-  account: 'main' | 'sub' | string;
+  account: string;      // 账号 ID (如 "account1", "account2")
+  name: string;         // 公众号名称 (如 "人类是我的副业")
+  appId: string;        // 微信 AppID
+  appSecret: string;    // 微信 AppSecret
 }
 
 /**

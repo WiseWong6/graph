@@ -7,6 +7,16 @@
 import OpenAI from "openai";
 import type { LLMNodeConfig } from "../config/llm.js";
 
+// DeepSeek-specific response extensions
+// The DeepSeek Reasoner model returns reasoning_content and reasoning_tokens
+interface DeepSeekCompletionMessage extends OpenAI.ChatCompletionMessage {
+  reasoning_content?: string;
+}
+
+interface DeepSeekCompletionUsage extends OpenAI.CompletionUsage {
+  reasoning_tokens?: number;
+}
+
 // Unified LLM call options - request parameters
 export interface LLMCallOptions {
   prompt: string;
@@ -122,6 +132,10 @@ export class LLMClient {
    * Used by both OpenAI and DeepSeek (which is API-compatible)
    *
    * This is the "happy path" - standard REST API, standard response format
+   *
+   * DeepSeek Reasoner support:
+   * - Streams reasoning_content when available (thinking process)
+   * - Configurable timeout to prevent "terminated" errors
    */
   private async callOpenAICompatible(options: LLMCallOptions): Promise<LLMResponse> {
     const apiKey = this.getApiKey(
@@ -129,9 +143,16 @@ export class LLMClient {
     );
     const baseURL = this.config.base_url || (this.config.provider === "deepseek" ? "https://api.deepseek.com" : "https://api.openai.com/v1");
 
+    // Calculate timeout: node config timeout (ms) * 2 for DeepSeek reasoning, or default 120s
+    // DeepSeek Reasoner may take up to 60s for thinking alone
+    const timeoutMs = this.config.provider === "deepseek"
+      ? (this.config.timeout || 120000) * 2
+      : (this.config.timeout || 120000);
+
     const client = new OpenAI({
       apiKey,
       baseURL,
+      timeout: timeoutMs,
     });
 
     // Build messages array - standard format shared by OpenAI-compatible APIs
@@ -141,6 +162,13 @@ export class LLMClient {
     }
     messages.push({ role: "user", content: options.prompt });
 
+    // DeepSeek 使用流式输出（支持所有 DeepSeek 模型）
+    const isDeepSeek = this.config.provider === "deepseek";
+
+    if (isDeepSeek) {
+      return await this.callDeepSeekStreaming(client, messages, options);
+    }
+
     const completion = await client.chat.completions.create({
       model: this.config.model,
       messages,
@@ -148,13 +176,92 @@ export class LLMClient {
       temperature: options.temperature || this.config.temperature || 0.7,
     });
 
+    // Handle DeepSeek Reasoner's reasoning_content (thinking process)
+    const response = completion.choices[0].message as DeepSeekCompletionMessage;
+    if (response.reasoning_content) {
+      console.log(`[LLMClient] 💭 DeepSeek Reasoning:\n${response.reasoning_content}`);
+    }
+
     // Normalize response to unified format
+    const usage = completion.usage as DeepSeekCompletionUsage | undefined;
+    const reasoningTokens = usage?.reasoning_tokens || 0;
     return {
-      text: completion.choices[0].message.content || "",
+      text: response.content || "",
       usage: {
         prompt_tokens: completion.usage?.prompt_tokens || 0,
-        completion_tokens: completion.usage?.completion_tokens || 0,
-        total_tokens: completion.usage?.total_tokens || 0,
+        completion_tokens: (completion.usage?.completion_tokens || 0) + reasoningTokens,
+        total_tokens: (completion.usage?.total_tokens || 0) + reasoningTokens,
+      },
+    };
+  }
+
+  /**
+   * DeepSeek Reasoner 流式输出
+   * 逐字显示思考过程和最终内容
+   */
+  private async callDeepSeekStreaming(
+    client: OpenAI,
+    messages: OpenAI.ChatCompletionMessageParam[],
+    options: LLMCallOptions
+  ): Promise<LLMResponse> {
+    const stream = await client.chat.completions.create({
+      model: this.config.model,
+      messages,
+      max_tokens: options.maxTokens || this.config.max_tokens || 4096,
+      temperature: options.temperature || this.config.temperature || 0.7,
+      stream: true,
+    });
+
+    let reasoningContent = "";
+    let responseContent = "";
+    let inReasoning = false;
+
+    console.log("[LLMClient] 💭 DeepSeek Thinking:");
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta as any; // DeepSeek 特有字段
+
+      // 处理推理内容（思考过程）
+      if (delta?.reasoning_content) {
+        const text = delta.reasoning_content;
+        reasoningContent += text;
+        // 逐字输出到控制台（不换行，逐字追加）
+        process.stdout.write(text);
+        inReasoning = true;
+      }
+
+      // 处理响应内容（最终回答）
+      if (delta?.content) {
+        if (inReasoning) {
+          console.log(); // 思考结束，换行
+          console.log("[LLMClient] ✍️  DeepSeek Response:");
+          inReasoning = false;
+        }
+        const text = delta.content;
+        responseContent += text;
+        // 逐字输出到控制台
+        process.stdout.write(text);
+      }
+    }
+
+    // 确保换行（如果输出了内容）
+    if (inReasoning || responseContent.length > 0) {
+      console.log();
+    }
+
+    // 确保输出完全刷新
+    process.stdout.write("");
+
+    // 计算使用量（估算）
+    const reasoningTokens = reasoningContent.length; // 粗略估算
+    const responseTokens = responseContent.length;
+
+    return {
+      text: responseContent,
+      usage: {
+        prompt_tokens: 0, // 流式响应不返回 prompt_tokens
+        completion_tokens: reasoningTokens + responseTokens,
+        total_tokens: reasoningTokens + responseTokens,
       },
     };
   }

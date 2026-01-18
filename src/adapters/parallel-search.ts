@@ -4,8 +4,9 @@
  * 职责: 协调多个搜索源，实现并行搜索和智能降级
  *
  * 优先级顺序:
- * 1. mcp-webresearch (Google 搜索，第一优先级)
- * 2. Firecrawl (付费搜索，第二优先级)
+ * 1. Tavily (专为 AI Agent 设计，最高优先级)
+ * 2. mcp-webresearch (Google 搜索)
+ * 3. Firecrawl (付费搜索)
  *
  * 策略:
  * - 并行执行所有搜索
@@ -16,6 +17,7 @@
 
 import { WebResearchAdapter } from "./mcp-webresearch.js";
 import { FirecrawlAdapter } from "./firecrawl.js";
+import { TavilyAdapter } from "./tavily.js";
 
 /**
  * 统一的搜索结果接口
@@ -24,7 +26,7 @@ export interface SearchResult {
   title: string;
   url: string;
   snippet: string;
-  source: "webresearch" | "firecrawl";
+  source: "tavily" | "webresearch" | "firecrawl";
   score?: number;
 }
 
@@ -32,7 +34,7 @@ export interface SearchResult {
  * 搜索策略接口
  */
 export interface SearchStrategy {
-  name: "webresearch" | "firecrawl";
+  name: "tavily" | "webresearch" | "firecrawl";
   priority: number;
   search: (query: string, limit: number) => Promise<SearchResult[]>;
 }
@@ -45,7 +47,7 @@ export interface ParallelSearchResult {
   sources: string[];
   metadata: {
     total: number;
-    bySource: Partial<Record<"webresearch" | "firecrawl", number>>;
+    bySource: Partial<Record<"tavily" | "webresearch" | "firecrawl", number>>;
     duration: number;
   };
 }
@@ -72,10 +74,40 @@ export class ParallelSearchManager {
 
   /**
    * 构建搜索策略
+   *
+   * 优先级:
+   * 0. tavily - 专为 AI Agent 设计 (最高优先级，需要 API Key)
+   * 1. webresearch - Google via Playwright
+   * 2. firecrawl - 付费搜索 API (需要 API Key)
    */
   private buildStrategies(): SearchStrategy[] {
-    const strategies: SearchStrategy[] = [
-      {
+    const strategies: SearchStrategy[] = [];
+
+    // 第零优先级: Tavily (专为 AI Agent 设计)
+    if (process.env.TAVILY_API_KEY) {
+      strategies.push({
+        name: "tavily",
+        priority: 0,
+        search: async (query, limit) => {
+          const adapter = new TavilyAdapter();
+          const result = await adapter.search(query, { limit });
+          if (result.success && result.data) {
+            return result.data.map(r => ({
+              title: r.title,
+              url: r.url,
+              snippet: r.content,
+              source: "tavily" as const,
+              score: r.score
+            }));
+          }
+          return [];
+        }
+      });
+    }
+
+    // 第一优先级: WebResearch (如果启用)
+    if (process.env.ENABLE_GOOGLE_SEARCH !== "false") {
+      strategies.push({
         name: "webresearch",
         priority: 1,
         search: async (query, limit) => {
@@ -86,10 +118,10 @@ export class ParallelSearchManager {
           }
           return [];
         }
-      }
-    ];
+      });
+    }
 
-    // 仅在有 API Key 时启用 Firecrawl
+    // 第二优先级: Firecrawl (如果有 API Key)
     if (process.env.FIRECRAWL_API_KEY) {
       strategies.push({
         name: "firecrawl",
@@ -127,7 +159,7 @@ export class ParallelSearchManager {
   ): Promise<ParallelSearchResult> {
     const {
       limit = 10,
-      timeout = 8000,
+      timeout = 30000,
       minResults = 3,
       enableFirecrawl = !!process.env.FIRECRAWL_API_KEY
     } = options;
@@ -137,6 +169,16 @@ export class ParallelSearchManager {
     console.log(`[ParallelSearch] 可用策略: ${this.strategies.map(s => s.name).join(", ")}`);
 
     const startTime = Date.now();
+
+    // 如果没有可用策略，返回空结果
+    if (this.strategies.length === 0) {
+      console.warn("[ParallelSearch] 没有可用的搜索策略");
+      return {
+        results: [],
+        sources: [],
+        metadata: { total: 0, bySource: {}, duration: 0 }
+      };
+    }
 
     // 并行执行所有搜索策略
     const promises = this.strategies
@@ -203,14 +245,14 @@ export class ParallelSearchManager {
   ): {
     results: SearchResult[];
     sources: string[];
-    bySource: Partial<Record<"webresearch" | "firecrawl", number>>;
+    bySource: Partial<Record<"tavily" | "webresearch" | "firecrawl", number>>;
   } {
     const allResults: SearchResult[] = [];
     const sources: string[] = [];
-    const bySource: Partial<Record<"webresearch" | "firecrawl", number>> = {};
+    const bySource: Partial<Record<"tavily" | "webresearch" | "firecrawl", number>> = {};
 
     // 按优先级顺序处理
-    const priorityOrder = ["webresearch", "firecrawl"];
+    const priorityOrder = ["tavily", "webresearch", "firecrawl"];
 
     for (const name of priorityOrder) {
       const outcome = outcomes.find(o => o.strategy === name);
@@ -259,10 +301,14 @@ export class ParallelSearchManager {
    * 检查所有搜索策略的可用性
    */
   async healthCheck(): Promise<{
+    tavily: boolean;
     webresearch: boolean;
     firecrawl: boolean;
   }> {
     const checks = await Promise.allSettled([
+      process.env.TAVILY_API_KEY
+        ? new TavilyAdapter().healthCheck()
+        : Promise.resolve({ success: true, data: { available: false } }),
       new WebResearchAdapter().healthCheck(),
       process.env.FIRECRAWL_API_KEY
         ? new FirecrawlAdapter().healthCheck()
@@ -270,8 +316,9 @@ export class ParallelSearchManager {
     ]);
 
     return {
-      webresearch: checks[0].status === "fulfilled" && checks[0].value.success,
-      firecrawl: checks[1].status === "fulfilled" && !!checks[1].value.data?.available
+      tavily: checks[0].status === "fulfilled" && !!checks[0].value.data?.available,
+      webresearch: checks[1].status === "fulfilled" && checks[1].value.success,
+      firecrawl: checks[2].status === "fulfilled" && !!checks[2].value.data?.available
     };
   }
 }

@@ -42,8 +42,17 @@ export async function draftboxNode(state: ArticleState): Promise<Partial<Article
     throw new Error("HTML path not found in state");
   }
 
-  // 获取标题
+  // 获取标题和公众号配置
   const title = state.decisions?.selectedTitle || state.titles?.[0] || "未命名文章";
+  const wechatConfig = state.decisions?.wechat;
+
+  if (!wechatConfig || !wechatConfig.appId || !wechatConfig.appSecret) {
+    console.error("[13_draftbox] ❌ 公众号配置不完整");
+    console.error("[13_draftbox] 请确保在 Gate A 正确选择了公众号");
+    throw new Error("WeChat account not configured in state");
+  }
+
+  console.log(`[13_draftbox] 目标公众号: ${wechatConfig.name}`);
 
   // 读取 HTML 内容
   if (!existsSync(state.htmlPath)) {
@@ -58,7 +67,7 @@ export async function draftboxNode(state: ArticleState): Promise<Partial<Article
 
   try {
     // ========== 发布到草稿箱 ==========
-    const result = await publishToDraftbox(title, htmlContent);
+    const result = await publishToDraftbox(title, htmlContent, wechatConfig);
 
     console.log(`[13_draftbox] Published successfully!`);
     console.log(`[13_draftbox] Draft URL: ${result.draft_url}`);
@@ -78,9 +87,14 @@ export async function draftboxNode(state: ArticleState): Promise<Partial<Article
  */
 async function publishToDraftbox(
   title: string,
-  htmlContent: string
+  htmlContent: string,
+  wechatConfig: { appId: string; appSecret: string; name: string }
 ): Promise<{ draft_url: string; media_id: string }> {
-  const config = getWechatConfig();
+  const config = {
+    appId: wechatConfig.appId,
+    appSecret: wechatConfig.appSecret,
+    apiUrl: process.env.WECHAT_API_URL || "https://api.weixin.qq.com"
+  };
 
   // 获取 access_token
   const token = await getAccessToken(config);
@@ -118,7 +132,11 @@ async function publishToDraftbox(
 /**
  * 获取 access_token
  */
-async function getAccessToken(config: WechatConfigInternal): Promise<string> {
+async function getAccessToken(config: {
+  appId: string;
+  appSecret: string;
+  apiUrl: string;
+}): Promise<string> {
   const response = await httpPost<{ access_token: string }>(
     `${config.apiUrl}/cgi-bin/token`,
     {
@@ -142,31 +160,4 @@ function extractDigest(html: string): string {
   return text.length > 120
     ? text.substring(0, 120) + "..."
     : text;
-}
-
-/**
- * 微信配置
- */
-interface WechatConfigInternal {
-  appId: string;
-  appSecret: string;
-  apiUrl: string;
-}
-
-/**
- * 获取微信配置
- */
-function getWechatConfig(): WechatConfigInternal {
-  const appId = process.env.WECHAT_APP_ID;
-  const appSecret = process.env.WECHAT_APP_SECRET;
-
-  if (!appId || !appSecret) {
-    throw new Error("WECHAT_APP_ID and WECHAT_APP_SECRET must be set");
-  }
-
-  return {
-    appId,
-    appSecret,
-    apiUrl: process.env.WECHAT_API_URL || "https://api.weixin.qq.com"
-  };
 }

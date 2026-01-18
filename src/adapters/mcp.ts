@@ -188,3 +188,27 @@ export async function httpPost<T>(
 
   return response.json() as Promise<T>;
 }
+
+/**
+ * HTTP POST 请求支持 form-data 文件上传
+ *
+ * @param url - 请求 URL
+ * @param formData - FormData 对象
+ * @returns 响应数据
+ */
+export async function httpPostFormData<T>(
+  url: string,
+  formData: FormData
+): Promise<T> {
+  const response = await fetch(url, {
+    method: "POST",
+    body: formData
+    // 不设置 Content-Type，让浏览器自动设置并添加 boundary
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+
+  return response.json() as Promise<T>;
+}

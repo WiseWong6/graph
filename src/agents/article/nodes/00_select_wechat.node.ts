@@ -7,15 +7,47 @@
  * 交互 UI:
  * ```
  * ? 请选择公众号账号:
- *   1. 主账号（主号）
- *   2. 备用账号（副号）
- *   3. 自定义别名
+ *   1. 人类是我的副业
+ *   2. 歪斯Wise
+ *   3. 自定义
  * ```
  *
  * 存储位置: state.decisions.wechat.account
  */
 
 import { ArticleState } from "../state";
+import { config } from "dotenv";
+
+// 加载环境变量
+config({ path: process.cwd() + "/.env" });
+
+/**
+ * 微信公众号配置
+ */
+interface WeChatAccount {
+  id: string;
+  name: string;
+  appId: string;
+  appSecret: string;
+}
+
+/**
+ * 可用的公众号列表
+ */
+const WECHAT_ACCOUNTS: WeChatAccount[] = [
+  {
+    id: "account1",
+    name: "人类是我的副业",
+    appId: process.env.WECHAT_APP_ID_1 || "",
+    appSecret: process.env.WECHAT_APP_SECRET_1 || ""
+  },
+  {
+    id: "account2",
+    name: "歪斯Wise",
+    appId: process.env.WECHAT_APP_ID_2 || "",
+    appSecret: process.env.WECHAT_APP_SECRET_2 || ""
+  }
+];
 
 /**
  * 交互提示函数类型
@@ -53,8 +85,7 @@ async function getPromptFn(): Promise<InteractivePrompt> {
  * 决策流程:
  * 1. 检查是否已有选择 (state.decisions.wechat?.account)
  * 2. 如果没有，弹出交互菜单
- * 3. 如果选择"自定义"，要求输入别名
- * 4. 保存决策到 state.decisions.wechat
+ * 3. 保存决策到 state.decisions.wechat (包括 appId 和 appSecret)
  */
 export async function selectWechatNode(
   state: ArticleState
@@ -71,46 +102,49 @@ export async function selectWechatNode(
 
   const prompt = await getPromptFn();
 
-  // 第一步：选择账号类型
-  const answer1 = await prompt<{ account: string }>([
+  // 过滤出配置完整的公众号
+  const availableAccounts = WECHAT_ACCOUNTS.filter(
+    acc => acc.appId && acc.appSecret
+  );
+
+  if (availableAccounts.length === 0) {
+    console.error("[select_wechat] ❌ 没有配置完整的公众号！");
+    console.error("[select_wechat] 请在 .env 中配置 WECHAT_APP_ID_1 和 WECHAT_APP_SECRET_1");
+    throw new Error("No WeChat account configured");
+  }
+
+  // 第一步：选择公众号
+  const answer1 = await prompt<{ accountId: string }>([
     {
       type: "list",
-      name: "account",
+      name: "accountId",
       message: "请选择公众号账号:",
-      choices: [
-        { name: "主账号（主号）", value: "main" },
-        { name: "备用账号（副号）", value: "sub" },
-        { name: "自定义别名", value: "custom" }
-      ]
+      choices: availableAccounts.map(acc => ({
+        name: acc.name,
+        value: acc.id
+      }))
     }
   ]);
 
-  let finalAccount = answer1.account;
+  const selectedAccount = availableAccounts.find(
+    acc => acc.id === answer1.accountId
+  );
 
-  // 第二步：如果是自定义，要求输入别名
-  if (finalAccount === "custom") {
-    const answer2 = await prompt<{ alias: string }>([
-      {
-        type: "input",
-        name: "alias",
-        message: "请输入公众号别名:",
-        validate: (input: string) => {
-          if (!input || input.trim().length === 0) {
-            return "别名不能为空";
-          }
-          return true;
-        }
-      }
-    ]);
-    finalAccount = answer2.alias.trim();
+  if (!selectedAccount) {
+    throw new Error(`Selected account not found: ${answer1.accountId}`);
   }
 
-  console.log(`[select_wechat] 已选择: ${finalAccount}\n`);
+  console.log(`[select_wechat] 已选择: ${selectedAccount.name}\n`);
 
   return {
     decisions: {
       ...state.decisions,
-      wechat: { account: finalAccount as "main" | "sub" | string }
+      wechat: {
+        account: selectedAccount.id,
+        name: selectedAccount.name,
+        appId: selectedAccount.appId,
+        appSecret: selectedAccount.appSecret
+      }
     }
   };
 }

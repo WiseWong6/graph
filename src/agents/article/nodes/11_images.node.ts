@@ -19,6 +19,7 @@ import { ArticleState } from "../state";
 import OpenAI from "openai";
 import { createLogger } from "../../../utils/logger.js";
 import { retry } from "../../../utils/errors.js";
+import { parallelMap } from "../../../utils/concurrency.js";
 
 const log = createLogger("11_images");
 
@@ -29,37 +30,6 @@ interface ArkConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
-}
-
-/**
- * 并发控制 - 并行执行多个异步任务
- */
-async function parallelMap<T, R>(
-  items: T[],
-  fn: (item: T, index: number) => Promise<R>,
-  concurrency: number
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  const executing: Promise<void>[] = [];
-
-  for (let i = 0; i < items.length; i++) {
-    const promise = fn(items[i], i).then(result => {
-      results[i] = result;
-    });
-
-    executing.push(promise);
-
-    if (executing.length >= concurrency) {
-      await Promise.race(executing);
-      executing.splice(
-        executing.findIndex(p => p === promise),
-        1
-      );
-    }
-  }
-
-  await Promise.all(executing);
-  return results;
 }
 
 /**
@@ -200,7 +170,7 @@ async function generateImage(
     size: size as any,  // Ark 支持 "2k" 等自定义尺寸
     response_format: "url",
     watermark: false  // 关闭水印
-  });
+  } as any);  // 使用 any 绕过类型检查，因为 Ark API 有额外参数
 
   if (!response.data || !response.data[0] || !response.data[0].url) {
     throw new Error("No image URL in response");

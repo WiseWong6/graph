@@ -1,16 +1,17 @@
 /**
  * Image Prompts 节点
  *
- * 职责: 基于人化文章生成图片提示词
+ * 职责: 基于初稿文章生成图片提示词
  *
  * 数据流:
- * humanized + imageConfig → LLM 生成提示词 → imagePrompts[]
+ * draft + imageConfig → LLM 生成提示词 → imagePrompts[]
  *
  * 设计原则:
  * - 每个核心段落生成一个提示词
  * - 根据选定风格使用对应的 Style Prefix
  * - 统一使用 16:9 比例（公众号）
  * - 使用英文提示词
+ * - 基于 draft（与 humanize 并行，不依赖 humanized）
  */
 
 import { ArticleState, ImageStyle } from "../state";
@@ -70,12 +71,12 @@ export interface ImagePrompt {
 export async function promptsNode(state: ArticleState): Promise<Partial<ArticleState>> {
   console.log("[10_prompts] Generating image prompts...");
 
-  if (!state.humanized) {
-    console.error("[10_prompts] No humanized article to generate prompts for");
-    throw new Error("Humanized article not found in state");
+  if (!state.draft) {
+    console.error("[10_prompts] No draft article to generate prompts for");
+    throw new Error("Draft article not found in state");
   }
 
-  // 获取图片配置
+  // 获取图片配置（需要 confirm 节点先完成）
   const imageConfig = state.decisions?.images;
   const count = imageConfig?.count || 4;
   const style: ImageStyle = imageConfig?.style || "infographic";
@@ -83,7 +84,7 @@ export async function promptsNode(state: ArticleState): Promise<Partial<ArticleS
   console.log(`[10_prompts] Config: ${count} images, style: ${STYLE_NAMES[style]}`);
 
   // ========== 构建 Prompt ==========
-  const prompt = buildPromptPrompt(state.humanized, count, style);
+  const prompt = buildPromptPrompt(state.draft, count, style);
 
   // ========== 调用 LLM ==========
   const llmConfig = getNodeLLMConfig("image_prompt");
@@ -321,7 +322,7 @@ function extractSummary(article: string): string {
 export const promptsNodeInfo = {
   name: "prompts",
   type: "llm" as const,
-  description: "基于人化文章和选定风格生成图片提示词",
-  reads: ["humanized", "decisions.images"],
+  description: "基于初稿文章和选定风格生成图片提示词",
+  reads: ["draft", "decisions.images"],
   writes: ["imagePrompts"]
 };

@@ -7,8 +7,10 @@
  * 3. 持久化索引到本地
  */
 
-import { VectorStoreIndex, storageContextFromDefaults, MetadataMode } from "llamaindex";
-import { join } from "path";
+import { VectorStoreIndex, storageContextFromDefaults, MetadataMode, Settings } from "llamaindex";
+import { HuggingFaceEmbedding } from "@llamaindex/huggingface";
+import { LanceDBVectorStore } from "../vector-store/lancedb.js";
+import { join, resolve } from "path";
 import { existsSync } from "fs";
 import type { RetrieveOptions, QuoteNode, ArticleNode, TitleNode } from "./schema.js";
 
@@ -19,11 +21,19 @@ class IndexManager {
   private titlesData: TitleNode[] = [];
   private indicesDir: string;
   private dataDir: string;
+  private indicesLoaded: boolean = false;  // 防止重复加载
+  private loadPromise: Promise<void> | null = null;  // 防止并发加载
 
   private constructor() {
     // 默认路径
     this.indicesDir = join(process.cwd(), ".index");
     this.dataDir = join(process.cwd(), "data");
+
+    // 设置嵌入模型（与 build-indices.ts 保持一致）
+    // 使用本地 HuggingFace 模型进行嵌入
+    Settings.embedModel = new HuggingFaceEmbedding({
+      modelType: resolve(process.cwd(), "local_models")
+    });
   }
 
   static getInstance(): IndexManager {
@@ -43,20 +53,43 @@ class IndexManager {
 
   /**
    * 加载所有索引
+   *
+   * 幂等性保证：
+   * - 已加载时直接返回
+   * - 正在加载时等待同一 Promise
+   * - 防止并发节点重复加载
    */
   async loadIndices(): Promise<void> {
-    console.log("[IndexManager] 开始加载索引...");
+    // 如果已加载，直接返回
+    if (this.indicesLoaded) {
+      return;
+    }
 
-    // 加载金句库索引
-    await this.loadQuotesIndex();
+    // 如果正在加载，等待同一个 Promise
+    if (this.loadPromise) {
+      return this.loadPromise;
+    }
 
-    // 加载文章库索引
-    await this.loadArticlesIndex();
+    // 开始加载
+    this.loadPromise = (async () => {
+      console.log("[IndexManager] 开始加载索引...");
 
-    // 加载标题库数据（BM25 不需要向量索引）
-    await this.loadTitlesData();
+      // 加载金句库索引
+      await this.loadQuotesIndex();
 
-    console.log("[IndexManager] ✅ 所有索引加载完成");
+      // 加载文章库索引
+      await this.loadArticlesIndex();
+
+      // 加载标题库数据（BM25 不需要向量索引）
+      await this.loadTitlesData();
+
+      this.indicesLoaded = true;
+      this.loadPromise = null;
+
+      console.log("[IndexManager] ✅ 所有索引加载完成");
+    })();
+
+    return this.loadPromise;
   }
 
   /**
@@ -64,6 +97,7 @@ class IndexManager {
    */
   private async loadQuotesIndex(): Promise<void> {
     const indexDir = join(this.indicesDir, "golden_quotes");
+    const lanceDbUri = join(indexDir, "lancedb");
 
     if (!existsSync(indexDir)) {
       console.warn(`[IndexManager] ⚠️ 金句库索引不存在: ${indexDir}`);
@@ -72,13 +106,33 @@ class IndexManager {
     }
 
     try {
-      const storageContext = await storageContextFromDefaults({
-        persistDir: indexDir
-      });
+      // 检查是否已迁移到 LanceDB
+      const useLanceDB = existsSync(lanceDbUri);
+      
+      let storageContext;
+      
+      if (useLanceDB) {
+        console.log("[IndexManager] 检测到 LanceDB (金句库)，正在加载...");
+        const vectorStore = new LanceDBVectorStore({
+          uri: lanceDbUri,
+          tableName: "quotes"
+        });
+        await vectorStore.init();
+        
+        storageContext = await storageContextFromDefaults({
+          persistDir: indexDir,
+          vectorStore: vectorStore
+        });
+      } else {
+        storageContext = await storageContextFromDefaults({
+          persistDir: indexDir
+        });
+      }
+
       this.quotesIndex = await VectorStoreIndex.init({
         storageContext
       });
-      console.log("[IndexManager] ✅ 金句库索引加载成功");
+      console.log(`[IndexManager] ✅ 金句库索引加载成功 (${useLanceDB ? "LanceDB" : "SimpleVectorStore"})`);
     } catch (error) {
       console.error(`[IndexManager] ❌ 金句库索引加载失败: ${error}`);
     }
@@ -89,6 +143,7 @@ class IndexManager {
    */
   private async loadArticlesIndex(): Promise<void> {
     const indexDir = join(this.indicesDir, "articles");
+    const lanceDbUri = join(indexDir, "lancedb");
 
     if (!existsSync(indexDir)) {
       console.warn(`[IndexManager] ⚠️ 文章库索引不存在: ${indexDir}`);
@@ -97,13 +152,33 @@ class IndexManager {
     }
 
     try {
-      const storageContext = await storageContextFromDefaults({
-        persistDir: indexDir
-      });
+      // 检查是否已迁移到 LanceDB
+      const useLanceDB = existsSync(lanceDbUri);
+      
+      let storageContext;
+      
+      if (useLanceDB) {
+        console.log("[IndexManager] 检测到 LanceDB，正在加载...");
+        const vectorStore = new LanceDBVectorStore({
+          uri: lanceDbUri,
+          tableName: "articles"
+        });
+        await vectorStore.init();
+        
+        storageContext = await storageContextFromDefaults({
+          persistDir: indexDir,
+          vectorStore: vectorStore
+        });
+      } else {
+        storageContext = await storageContextFromDefaults({
+          persistDir: indexDir
+        });
+      }
+
       this.articlesIndex = await VectorStoreIndex.init({
         storageContext
       });
-      console.log("[IndexManager] ✅ 文章库索引加载成功");
+      console.log(`[IndexManager] ✅ 文章库索引加载成功 (${useLanceDB ? "LanceDB" : "SimpleVectorStore"})`);
     } catch (error) {
       console.error(`[IndexManager] ❌ 文章库索引加载失败: ${error}`);
     }
@@ -153,11 +228,26 @@ class IndexManager {
 
     try {
       const results = await retriever.retrieve(query);
-      return results.map(r => ({
-        content: (r.node as any).text || r.node.getContent(MetadataMode.ALL),
-        metadata: r.node.metadata as QuoteNode["metadata"],
-        score: r.score
-      }));
+      console.log("[IndexManager] 调试: 第一个结果节点结构:", JSON.stringify(results[0]?.node, null, 2).substring(0, 500));
+
+      return results.map(r => {
+        // 尝试多种方式获取内容
+        let content = "";
+        if ((r.node as any).text) {
+          content = (r.node as any).text;
+        } else {
+          const docContent = r.node.getContent(MetadataMode.NONE);
+          content = typeof docContent === "string" ? docContent : String(docContent);
+        }
+
+        console.log("[IndexManager] 调试: 提取的内容长度:", content.length, "前50字符:", content.substring(0, 50));
+
+        return {
+          content,
+          metadata: r.node.metadata as QuoteNode["metadata"],
+          score: r.score
+        };
+      });
     } catch (error) {
       console.error(`[IndexManager] 金句检索失败: ${error}`);
       return [];
@@ -178,11 +268,22 @@ class IndexManager {
 
     try {
       const results = await retriever.retrieve(query);
-      return results.map(r => ({
-        content: (r.node as any).text || r.node.getContent(MetadataMode.ALL),
-        metadata: r.node.metadata as ArticleNode["metadata"],
-        score: r.score
-      }));
+      return results.map(r => {
+        // 尝试多种方式获取内容
+        let content = "";
+        if ((r.node as any).text) {
+          content = (r.node as any).text;
+        } else {
+          const docContent = r.node.getContent(MetadataMode.NONE);
+          content = typeof docContent === "string" ? docContent : String(docContent);
+        }
+
+        return {
+          content,
+          metadata: r.node.metadata as ArticleNode["metadata"],
+          score: r.score
+        };
+      });
     } catch (error) {
       console.error(`[IndexManager] 文章检索失败: ${error}`);
       return [];
@@ -222,7 +323,7 @@ class IndexManager {
   private extractKeywords(text: string): string[] {
     // 简单实现：提取 2-4 字的中文词汇
     const matches = text.match(/[\u4e00-\u9fa5]{2,4}/g) || [];
-    return [...new Set(matches)];
+    return Array.from(new Set(matches));
   }
 
   /**

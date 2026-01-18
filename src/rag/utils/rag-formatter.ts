@@ -15,7 +15,7 @@ export function formatRAGContent(data: RAGContent): string {
   md += `**检索时间**: ${data.stats.retrievalTime}ms\n\n`;
 
   // 相关金句
-  if (data.quotes.length > 0) {
+  if (data.quotes && data.quotes.length > 0) {
     md += `## 相关金句 (${data.quotes.length})\n\n`;
     data.quotes.forEach((q, i) => {
       md += `### ${i + 1}. ${q.content}\n\n`;
@@ -30,19 +30,21 @@ export function formatRAGContent(data: RAGContent): string {
   }
 
   // 相关文章片段
-  if (data.articles.length > 0) {
+  if (data.articles && data.articles.length > 0) {
     md += `## 相关文章片段 (${data.articles.length})\n\n`;
     data.articles.forEach((a, i) => {
-      md += `### ${i + 1}. ${a.metadata.title || "无标题"}\n\n`;
+      const title = a.metadata?.title || "无标题";
+      md += `### ${i + 1}. ${title}\n\n`;
 
-      // 截取前 500 字
-      const preview = a.content.length > 500
-        ? a.content.slice(0, 500) + "..."
-        : a.content;
+      // 截取前 500 字（防御性检查）
+      if (a.content && a.content.length > 0) {
+        const preview = a.content.length > 500
+          ? a.content.slice(0, 500) + "..."
+          : a.content;
+        md += `${preview}\n\n`;
+      }
 
-      md += `${preview}\n\n`;
-
-      if (a.metadata.author) {
+      if (a.metadata?.author) {
         md += `> 来源: ${a.metadata.author}\n\n`;
       }
     });
@@ -76,7 +78,7 @@ export function extractKeywords(brief: string): string[] {
   const matches = brief.match(/[\u4e00-\u9fa5]{2,4}/g) || [];
 
   // 去重并返回前 10 个
-  return [...new Set(matches)].slice(0, 10);
+  return Array.from(new Set(matches)).slice(0, 10);
 }
 
 /**
