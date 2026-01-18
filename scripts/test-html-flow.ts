@@ -215,41 +215,36 @@ async function step3_convertToHtml(markdown: string, imageUrls: string[]): Promi
 
   const tempDir = join(process.cwd(), "output", "html-flow-test");
 
-  // 方案 1: 使用 md-to-wxhtml 技能（需要在 Claude Code 环境）
-  print("yellow", "尝试调用 md-to-wxhtml 技能...\n");
+  // 使用 md-to-wxhtml Python 脚本
+  print("yellow", "使用 md-to-wxhtml 脚本转换...\n");
 
-  let html: string;
+  const tempMdPath = join(tempDir, "_temp.md");
+  writeFileSync(tempMdPath, processedMarkdown, "utf-8");
+
+  const htmlPath = join(tempDir, "article.html");
 
   try {
     const { execSync } = await import("child_process");
-    const tempMdPath = join(tempDir, "_temp.md");
-    writeFileSync(tempMdPath, processedMarkdown, "utf-8");
 
-    const result = execSync(
-      `claude skill run md-to-wxhtml "${tempMdPath}"`,
+    const scriptPath = join(process.env.HOME || "", ".claude/skills/md-to-wxhtml/scripts/convert_md_to_wx_html.py");
+
+    execSync(
+      `python3 "${scriptPath}" "${tempMdPath}" -o "${htmlPath}"`,
       { encoding: "utf-8", stdio: "pipe" }
     );
 
-    // 检查是否返回了帮助信息
-    if (result.includes("我理解你想要查看或使用某个 skill")) {
-      throw new Error("Skill call failed");
-    }
+    print("green", "✅ HTML 转换成功\n");
 
-    print("green", "✅ 技能调用成功\n");
-    html = result;
+    const html = readFileSync(htmlPath, "utf-8");
+    print("gray", `HTML 长度: ${html.length} 字符\n`);
+
+    return html;
   } catch (error) {
-    print("yellow", "⚠️ 技能不可用，使用改进的降级方案\n");
-
-    // 改进的降级方案：更接近微信编辑器格式
-    html = convertMarkdownToWxHtml(processedMarkdown, imageUrls);
+    print("yellow", "⚠️ Python 脚本失败，使用内置转换\n");
+    const html = convertMarkdownToWxHtml(processedMarkdown, imageUrls);
+    writeFileSync(htmlPath, html, "utf-8");
+    return html;
   }
-
-  // 保存 HTML
-  const htmlPath = join(tempDir, "article.html");
-  writeFileSync(htmlPath, html, "utf-8");
-  print("gray", `HTML 长度: ${html.length} 字符\n`);
-
-  return html;
 }
 
 /**
@@ -396,6 +391,9 @@ async function step4_publishToDraftbox(html: string, title: string): Promise<voi
   // 提取摘要
   const digest = html.replace(/<[^>]*>/g, "").substring(0, 120);
 
+  // 调试: 打印 HTML 内容
+  print("gray", `HTML 内容预览: ${html.substring(0, 300)}...\n`);
+
   // 构建草稿数据
   const draftData = {
     articles: [{
@@ -409,24 +407,31 @@ async function step4_publishToDraftbox(html: string, title: string): Promise<voi
 
   print("gray", "发布中...\n");
 
-  const response = await fetch(
-    `https://api.weixin.qq.com/cgi-bin/draft/add?access_token=${accessToken}`,
-    {
+  const apiUrl = `https://api.weixin.qq.com/cgi-bin/draft/add?access_token=${accessToken}`;
+  print("gray", `API URL: ${apiUrl.substring(0, 60)}...\n`);
+
+  try {
+    const response = await fetch(apiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(draftData)
+    });
+
+    print("gray", `HTTP 状态: ${response.status} ${response.statusText}\n`);
+
+    const result = await response.json();
+
+    print("gray", `API 响应: ${JSON.stringify(result, null, 2)}\n`);
+
+    if (result.errcode) {
+      print("red", `❌ 发布失败 (errcode: ${result.errcode}): ${result.errmsg}\n`);
+    } else {
+      print("green", `✅ 发布成功！\n`);
+      print("gray", `media_id: ${result.media_id}\n`);
     }
-  );
-
-  const result = await response.json();
-
-  print("gray", `API 响应: ${JSON.stringify(result, null, 2)}\n`);
-
-  if (result.errcode) {
-    print("red", `❌ 发布失败 (errcode: ${result.errcode}): ${result.errmsg}\n`);
-  } else {
-    print("green", `✅ 发布成功！\n`);
-    print("gray", `media_id: ${result.media_id}\n`);
+  } catch (error) {
+    print("red", `❌ 网络请求失败: ${error}\n`);
+    throw error;
   }
 }
 

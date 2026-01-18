@@ -54,7 +54,7 @@ export interface Decisions {
  * Article Agent State Definition v2
  *
  * 完整流程数据流:
- * prompt → research → rag → titles → (select_title) → draft → polish → rewrite → humanize
+ * prompt → research → rag → titles → (select_title) → draft → rewrite → humanize
  * → (confirm_images) → prompts → images → upload → html → draftbox
  *
  * 设计原则:
@@ -73,14 +73,13 @@ export const ArticleAnnotation = Annotation.Root({
   ragContent: Annotation<string>,              // 02_rag 向量检索内容
   titles: Annotation<string[]>,                // 03_titles 生成的标题选项
   draft: Annotation<string>,                   // 05_draft 初稿内容
-  polished: Annotation<string>,                // 06_polish 润色后内容
-  rewritten: Annotation<string>,               // 07_rewrite 智性叙事重写内容
+  rewritten: Annotation<string>,               // 06_rewrite 智性叙事重写内容
   humanized: Annotation<string>,               // 08_humanize 人化后内容
-  imagePrompts: Annotation<string[]>,          // 10_prompts 图片提示词列表
+  imagePrompts: Annotation<string[]>,          // 09_prompts 图片提示词列表
 
   // ========== 代码节点输出 ==========
   imagePaths: Annotation<string[]>,            // 11_images 生成的本地图片路径
-  uploadedImageUrls: Annotation<string[]>,     // 11.5_upload 上传后的 URL
+  uploadedImageUrls: Annotation<string[]>,     // 11.5_upload 上传后的 URL（默认空数组）
   htmlPath: Annotation<string>,                // 12_html 生成的 HTML 文件路径
 
   // ========== 决策状态（交互节点） ==========

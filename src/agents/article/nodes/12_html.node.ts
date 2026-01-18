@@ -100,24 +100,45 @@ const WECHAT_STYLES = `
  * @returns 更新的状态
  */
 export async function htmlNode(state: ArticleState): Promise<Partial<ArticleState>> {
-  console.log("[12_html] Converting Markdown to HTML...");
+  console.log("[12_html] ========== START ==========");
+  console.log("[12_html] humanized exists:", !!state.humanized);
+  console.log("[12_html] uploadedImageUrls:", state.uploadedImageUrls);
+  console.log("[12_html] uploadedImageUrls.length:", state.uploadedImageUrls?.length || 0);
+  console.log("[12_html] current state keys:", Object.keys(state));
 
   if (!state.humanized) {
     console.error("[12_html] No humanized article to convert");
     throw new Error("Humanized article not found in state");
   }
 
-  // 显式等待图片上传完成
-  const uploadedUrls = state.uploadedImageUrls || [];
-  const expectedImageCount = uploadedUrls.length > 0 ? uploadedUrls.length : 0;
-
-  console.log(`[12_html] Expected ${expectedImageCount} images, got ${uploadedUrls.length} uploaded URLs`);
-
-  // 如果配置了图片但还没有上传完成，等待一下
-  if (expectedImageCount > 0 && uploadedUrls.length === 0) {
-    console.warn("[12_html] Warning: Image count configured but no uploaded URLs found");
-    console.warn("[12_html] This may indicate a workflow ordering issue");
+  // ========== 防御性检查 ==========
+  if (!state.uploadedImageUrls) {
+    console.error("[12_html] ========== ERROR ==========");
+    console.error("[12_html] uploadedImageUrls is MISSING in state!");
+    console.error("[12_html] This means 11_upload node was not executed or failed.");
+    console.error("[12_html] State keys:", Object.keys(state));
+    throw new Error("uploadedImageUrls not found - 11_upload node may have been skipped");
   }
+
+  // 检查用户是否配置了图片
+  const expectedImageCount = state.decisions?.images?.count || 0;
+
+  if (expectedImageCount > 0 && state.uploadedImageUrls.length === 0) {
+    console.error("[12_html] ========== ERROR ==========");
+    console.error(`[12_html] User configured ${expectedImageCount} images, but uploadedImageUrls is EMPTY!`);
+    console.error("[12_html] This means 11_upload node failed or was skipped.");
+    console.error("[12_html] State keys:", Object.keys(state));
+    throw new Error(`Expected ${expectedImageCount} uploaded URLs, but got 0 - 11_upload node may have failed`);
+  }
+
+  if (expectedImageCount === 0 && state.uploadedImageUrls.length === 0) {
+    console.log("[12_html] User configured 0 images, skipping image processing");
+    // 移除 Markdown 中的所有图片占位符
+    state.humanized = state.humanized.replace(/!\[.*?\]\(.*?\)/g, "");
+  }
+
+  const uploadedUrls = state.uploadedImageUrls;
+  console.log(`[12_html] Processing ${uploadedUrls.length} uploaded images (user configured ${expectedImageCount})`);
 
   const outputPath = state.outputPath || getDefaultOutputPath();
   const finalDir = join(outputPath, "final");
@@ -130,7 +151,7 @@ export async function htmlNode(state: ArticleState): Promise<Partial<ArticleStat
 
   // ========== 步骤 1: 替换图片索引为 CDN URL ==========
   let markdown = state.humanized;
-  markdown = replaceImagePlaceholders(markdown, state.uploadedImageUrls || []);
+  markdown = replaceImagePlaceholders(markdown, state.uploadedImageUrls);
 
   // ========== 步骤 2: 使用 markdown-it 解析 Markdown ==========
   const md = new MarkdownIt({
@@ -186,39 +207,34 @@ function replaceImagePlaceholders(
   markdown: string,
   uploadedUrls: string[]
 ): string {
-  if (uploadedUrls.length === 0) {
-    console.log("[12_html] No uploaded URLs, skipping image replacement");
-    return markdown;
-  }
-
   // 匹配图片占位符: ![描述](索引)
   const imagePattern = /!\[(.*?)\]\((\d+)\)/g;
 
   let replacementCount = 0;
-  const result = markdown.replace(imagePattern, (match, alt, indexStr) => {
+
+  const result = markdown.replace(imagePattern, (_match, alt, indexStr) => {
     const index = parseInt(indexStr, 10);
 
     // 检查索引是否有效
     if (index < 0 || index >= uploadedUrls.length) {
       console.warn(`[12_html] Invalid image index: ${index} (available: 0-${uploadedUrls.length - 1})`);
-      // 保持原样或使用占位符
-      return match;
+      return _match;  // 保持原样
     }
 
     const cdnUrl = uploadedUrls[index];
     if (!cdnUrl) {
-      console.warn(`[12_html] No CDN URL for index ${index}`);
-      return match;
+      console.warn(`[12_html] No CDN URL for index ${index} (URL is null/undefined)`);
+      return _match;  // 保持原样
     }
 
     replacementCount++;
-    console.log(`[12_html] Replaced [${index}] → ${cdnUrl}`);
+    console.log(`[12_html] Replaced [${index}] → ${cdnUrl.substring(0, 50)}...`);
 
     // 替换为真实 URL
     return `![${alt}](${cdnUrl})`;
   });
 
-  console.log(`[12_html] Replaced ${replacementCount} image placeholders`);
+  console.log(`[12_html] Replaced ${replacementCount}/${uploadedUrls.length} image placeholders`);
 
   return result;
 }

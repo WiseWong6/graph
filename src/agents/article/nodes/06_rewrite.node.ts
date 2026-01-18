@@ -67,7 +67,7 @@ export async function rewriteNode(state: ArticleState): Promise<Partial<ArticleS
   log.startStep("validate_input");
 
   // ========== 验证输入 ==========
-  // 使用 draft 作为输入（Polish 节点已删除）
+  // 使用 draft 作为输入
   const contentToRewrite = state.draft;
   if (!contentToRewrite) {
     throw new ValidationError("Draft content not found in state", "draft");
@@ -248,7 +248,7 @@ function extractSection(markdown: string, startMarker: string, endMarker: string
 /**
  * 构建 Rewrite Prompt - 简洁版
  */
-function buildRewritePrompt(title: string, brief: RewriteBrief, rag: RewriteRAG, polished: string): string {
+function buildRewritePrompt(title: string, brief: RewriteBrief, rag: RewriteRAG, draftContent: string): string {
   const lines: string[] = [];
 
   lines.push("# 写作任务：智性叙事重写（只输出成稿）\n");
@@ -271,7 +271,7 @@ function buildRewritePrompt(title: string, brief: RewriteBrief, rag: RewriteRAG,
   // ========== 待重写正文 ==========
   lines.push("【待重写正文】");
   lines.push("<<<");
-  lines.push(polished);
+  lines.push(draftContent);
   lines.push(">>>");
   lines.push("");
 

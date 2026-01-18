@@ -42,23 +42,35 @@ interface UploadImageResponse {
  * @returns 更新的状态
  */
 export async function uploadImagesNode(state: ArticleState): Promise<Partial<ArticleState>> {
-  console.log("[11.5_upload] Uploading images to WeChat CDN...");
+  console.log("[11.5_upload] ========== START ==========");
+  console.log("[11.5_upload] imagePaths:", state.imagePaths);
+  console.log("[11.5_upload] wechat config:", state.decisions?.wechat ? "SET" : "MISSING");
+  console.log("[11.5_upload] current state keys:", Object.keys(state));
 
   if (!state.imagePaths || state.imagePaths.length === 0) {
     console.log("[11.5_upload] No images to upload");
+    console.log("[11.5_upload] Returning empty uploadedImageUrls");
+    console.log("[11.5_upload] ========== END ==========");
     return {
       uploadedImageUrls: []
     };
   }
 
   // 使用 select_wechat 节点选择的微信配置
-  const config = state.wechat;
+  const config = state.decisions?.wechat;
 
   if (!config) {
     throw new Error("WeChat config not found in state. Please run select_wechat first.");
   }
 
   console.log(`[11.5_upload] Uploading ${state.imagePaths.length} images...`);
+
+  // 构建 uploadImage 函数期望的配置（添加 apiUrl）
+  const uploadConfig = {
+    appId: config.appId,
+    appSecret: config.appSecret,
+    apiUrl: "https://api.weixin.qq.com"
+  };
 
   // ========== 并行上传 ==========
   const concurrency = parseInt(process.env.UPLOAD_CONCURRENCY || "5");
@@ -80,7 +92,7 @@ export async function uploadImagesNode(state: ArticleState): Promise<Partial<Art
         const imageBuffer = readFileSync(imagePath);
 
         // 上传
-        const result = await uploadImage(imageBuffer, config);
+        const result = await uploadImage(imageBuffer, uploadConfig);
 
         // 避免频率限制
         await delay(300);
@@ -104,6 +116,8 @@ export async function uploadImagesNode(state: ArticleState): Promise<Partial<Art
   }
 
   console.log(`[11.5_upload] Uploaded ${uploadedUrls.length} images successfully`);
+  console.log("[11.5_upload] Returning uploadedImageUrls:", uploadedUrls);
+  console.log("[11.5_upload] ========== END ==========");
 
   return {
     uploadedImageUrls: uploadedUrls
@@ -149,25 +163,36 @@ async function uploadImage(
 }
 
 /**
- * 获取 access_token
+ * 获取 stable access_token（微信推荐的新接口）
+ *
+ * 文档: https://developers.weixin.qq.com/doc/offiaccount/Basic_Information/getStableAccessToken.html
  */
 async function getAccessToken(config: WechatConfig): Promise<string> {
   const response = await fetch(
-    `${config.apiUrl}/cgi-bin/token?grant_type=client_credential&appid=${config.appId}&secret=${config.appSecret}`
+    `${config.apiUrl}/cgi-bin/stable_token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "client_credential",
+        appid: config.appId,
+        secret: config.appSecret
+      })
+    }
   );
 
   if (!response.ok) {
-    throw new Error(`Failed to get access_token: ${response.statusText}`);
+    throw new Error(`Failed to get stable access_token: ${response.statusText}`);
   }
 
   const data = await response.json() as { access_token: string; errcode?: number; errmsg?: string };
 
   if (data.errcode && data.errcode !== 0) {
-    throw new Error(`Failed to get access_token: ${data.errmsg} (errcode: ${data.errcode})`);
+    throw new Error(`Failed to get stable access_token: ${data.errmsg} (errcode: ${data.errcode})`);
   }
 
   if (!data.access_token) {
-    throw new Error("Failed to get access_token: no token returned");
+    throw new Error("Failed to get stable access_token: no token returned");
   }
 
   return data.access_token;

@@ -219,7 +219,7 @@ export async function confirmImagesNode(
   console.log("\n=== Gate B: 确认图片配置 ===\n");
 
   // ========== 步骤1: 分析内容，推荐风格 ==========
-  const content = state.humanized || state.rewritten || state.polished || state.draft || "";
+  const content = state.humanized || state.rewritten || state.draft || "";
   const recommendedStyle = recommendStyle(content);
 
   console.log("=== 图片风格推荐 ===");

@@ -4,7 +4,7 @@
  * 职责: 去除 AI 味，增加活人感和情感共鸣
  *
  * 数据流:
- * rewritten (or polished) → LLM 人化 → humanized
+ * rewritten → LLM 人化 → humanized
  *
  * 设计原则:
  * - 格式清洗：去空格、标点规范、去引号
@@ -12,7 +12,7 @@
  * - 保留 Markdown 结构（代码/链接/图片）
  *
  * 核心差异：
- * - Polish: 语言润色，保持专业感
+ * - Draft: 初稿
  * - Rewrite: 智性叙事，注入灵魂
  * - Humanize: 去机械化，增加活人感
  */
@@ -43,14 +43,14 @@ export async function humanizeNode(state: ArticleState): Promise<Partial<Article
   log.startStep("validate_input");
 
   // ========== 验证输入 ==========
-  // 优先使用 rewritten，降级到 polished
-  const input = state.rewritten || state.polished;
+  // 优先使用 rewritten，降级到 draft
+  const input = state.rewritten || state.draft;
 
   if (!input) {
-    throw new ValidationError("Content not found in state (need rewritten or polished)", "rewritten|polished");
+    throw new ValidationError("Content not found in state (need rewritten or draft)", "rewritten|draft");
   }
 
-  const sourceType = state.rewritten ? "rewritten" : "polished";
+  const sourceType = state.rewritten ? "rewritten" : "draft";
   log.completeStep("validate_input", { sourceType, inputLength: input.length });
 
   // ========== 构建 Prompt ==========

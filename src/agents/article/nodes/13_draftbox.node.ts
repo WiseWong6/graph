@@ -17,15 +17,12 @@ import { ArticleState } from "../state";
 import { httpPost } from "../../../adapters/mcp.js";
 
 /**
- * 微信草稿响应
+ * 微信草稿响应（原始 API 格式）
  */
 interface DraftboxResponse {
-  success: boolean;
-  data?: {
-    media_id: string;
-    draft_url: string;
-  };
-  error?: string;
+  media_id: string;
+  errcode?: number;
+  errmsg?: string;
 }
 
 /**
@@ -100,15 +97,20 @@ async function publishToDraftbox(
   const token = await getAccessToken(config);
 
   // 构建草稿数据
+  // 注意：如果文章类型为 news（图文消息），thumb_media_id 是必填的
+  // 我们使用第一张图片作为封面
   const draftData = {
     articles: [{
       title,
       content: htmlContent,
       digest: extractDigest(htmlContent), // 摘要
       author: "AI Assistant",
-      show_cover_pic: 0
+      show_cover_pic: 0,  // 不显示封面图
+      // thumb_media_id: "xxx" // 如果需要封面，需要先上传永久素材
     }]
   };
+
+  console.log(`[13_draftbox] Draft data keys:`, Object.keys(draftData.articles[0]));
 
   // 调用 API
   const response = await httpPost<DraftboxResponse>(
@@ -119,32 +121,55 @@ async function publishToDraftbox(
     }
   );
 
-  if (!response.success || !response.data) {
-    throw new Error(response.error || "Failed to publish to draftbox");
+  // 检查 API 错误
+  if (response.errcode && response.errcode !== 0) {
+    throw new Error(`WeChat API Error: ${response.errmsg} (errcode: ${response.errcode})`);
   }
 
+  if (!response.media_id) {
+    throw new Error("Failed to publish: no media_id returned");
+  }
+
+  console.log(`[13_draftbox] media_id: ${response.media_id}`);
+
+  // 构造草稿箱 URL
+  const draftUrl = `https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2&action=edit&isNew=1&type=10&createType=0&token=${token}&lang=zh_CN&mid=${response.media_id}`;
+
   return {
-    draft_url: response.data.draft_url,
-    media_id: response.data.media_id
+    draft_url: draftUrl,
+    media_id: response.media_id
   };
 }
 
 /**
- * 获取 access_token
+ * 获取 stable access_token（微信推荐的新接口）
+ *
+ * 文档: https://developers.weixin.qq.com/doc/offiaccount/Basic_Information/getStableAccessToken.html
+ *
+ * 使用 POST 请求，更安全可靠
  */
 async function getAccessToken(config: {
   appId: string;
   appSecret: string;
   apiUrl: string;
 }): Promise<string> {
-  const response = await httpPost<{ access_token: string }>(
-    `${config.apiUrl}/cgi-bin/token`,
+  // 使用新的 stable access_token 接口
+  const response = await httpPost<{ access_token: string; errcode?: number; errmsg?: string }>(
+    `${config.apiUrl}/cgi-bin/stable_token`,
     {
       grant_type: "client_credential",
       appid: config.appId,
       secret: config.appSecret
     }
   );
+
+  if (response.errcode && response.errcode !== 0) {
+    throw new Error(`Failed to get stable access_token: ${response.errmsg} (errcode: ${response.errcode})`);
+  }
+
+  if (!response.access_token) {
+    throw new Error("Failed to get stable access_token: no token returned");
+  }
 
   return response.access_token;
 }

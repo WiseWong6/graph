@@ -27,15 +27,14 @@ const NODE_INFO: Record<string, { name: string; description: string; hasOutput: 
   "03_titles": { name: "生成标题", description: "基于 Brief 和 RAG 生成候选标题", hasOutput: true, isInteractive: false },
   "gate_c_select_title": { name: "选择标题", description: "从候选标题中选择一个", hasOutput: false, isInteractive: true },
   "05_draft": { name: "撰写初稿", description: "基于 Brief 和 RAG 撰写初稿", hasOutput: true, isInteractive: false },
-  "06_polish": { name: "润色", description: "优化语言表达", hasOutput: true, isInteractive: false },
-  "07_rewrite": { name: "智性叙事重写", description: "IPS 原则 + HKR 自检", hasOutput: true, isInteractive: false },
-  "08_confirm": { name: "确认图片配置", description: "确认图片数量和风格", hasOutput: false, isInteractive: true },
-  "09_humanize": { name: "人化", description: "去除 AI 味，增加活人感", hasOutput: true, isInteractive: false },
-  "10_prompts": { name: "生成图片提示词", description: "为每张图生成详细提示词", hasOutput: true, isInteractive: false },
-  "11_images": { name: "生成图片", description: "调用 Ark API 生成图片", hasOutput: true, isInteractive: false },
-  "12_upload": { name: "上传图片", description: "上传到微信 CDN", hasOutput: true, isInteractive: false },
-  "13_html": { name: "转换 HTML", description: "Markdown 转微信编辑器格式", hasOutput: true, isInteractive: false },
-  "14_draftbox": { name: "发布到草稿箱", description: "发布到微信公众号草稿箱", hasOutput: true, isInteractive: false },
+  "06_rewrite": { name: "智性叙事重写", description: "IPS 原则 + HKR 自检", hasOutput: true, isInteractive: false },
+  "07_confirm": { name: "确认图片配置", description: "确认图片数量和风格", hasOutput: false, isInteractive: true },
+  "08_humanize": { name: "人化", description: "去除 AI 味，增加活人感", hasOutput: true, isInteractive: false },
+  "09_prompts": { name: "生成图片提示词", description: "为每张图生成详细提示词", hasOutput: true, isInteractive: false },
+  "10_images": { name: "生成图片", description: "调用 Ark API 生成图片", hasOutput: true, isInteractive: false },
+  "11_upload": { name: "上传图片", description: "上传到微信 CDN", hasOutput: true, isInteractive: false },
+  "12_html": { name: "转换 HTML", description: "Markdown 转微信编辑器格式", hasOutput: true, isInteractive: false },
+  "13_draftbox": { name: "发布到草稿箱", description: "发布到微信公众号草稿箱", hasOutput: true, isInteractive: false },
   "end": { name: "完成", description: "清理和确认", hasOutput: false, isInteractive: false },
 };
 
@@ -93,19 +92,7 @@ function formatNodeOutput(nodeName: string, state: ArticleState): string {
       }
       break;
 
-    case "06_polish":
-      if (state.polished) {
-        lines.push(chalk.cyan("✨ 润色后:"));
-        lines.push("─".repeat(50));
-        const preview = state.polished.slice(0, 500);
-        lines.push(preview);
-        if (state.polished.length > 500) {
-          lines.push(chalk.gray(`... (省略 ${state.polished.length - 500} 字)`));
-        }
-      }
-      break;
-
-    case "07_rewrite":
+    case "06_rewrite":
       if (state.rewritten) {
         lines.push(chalk.cyan("🔄 智性叙事重写:"));
         lines.push("─".repeat(50));
@@ -117,7 +104,7 @@ function formatNodeOutput(nodeName: string, state: ArticleState): string {
       }
       break;
 
-    case "09_humanize":
+    case "08_humanize":
       if (state.humanized) {
         lines.push(chalk.cyan("👤 人化后:"));
         lines.push("─".repeat(50));
@@ -129,7 +116,7 @@ function formatNodeOutput(nodeName: string, state: ArticleState): string {
       }
       break;
 
-    case "10_prompts":
+    case "09_prompts":
       if (state.imagePrompts && state.imagePrompts.length > 0) {
         lines.push(chalk.cyan("🎨 图片提示词:"));
         lines.push("─".repeat(50));
@@ -140,7 +127,7 @@ function formatNodeOutput(nodeName: string, state: ArticleState): string {
       }
       break;
 
-    case "11_images":
+    case "10_images":
       if (state.imagePaths && state.imagePaths.length > 0) {
         lines.push(chalk.cyan("🖼️ 生成的图片:"));
         lines.push("─".repeat(50));
@@ -150,7 +137,7 @@ function formatNodeOutput(nodeName: string, state: ArticleState): string {
       }
       break;
 
-    case "12_upload":
+    case "11_upload":
       if (state.uploadedImageUrls && state.uploadedImageUrls.length > 0) {
         lines.push(chalk.cyan("⬆️ 上传后的 URL:"));
         lines.push("─".repeat(50));
@@ -160,7 +147,7 @@ function formatNodeOutput(nodeName: string, state: ArticleState): string {
       }
       break;
 
-    case "13_html":
+    case "12_html":
       if (state.htmlPath) {
         lines.push(chalk.cyan("📄 HTML 文件:"));
         lines.push("─".repeat(50));
@@ -168,7 +155,7 @@ function formatNodeOutput(nodeName: string, state: ArticleState): string {
       }
       break;
 
-    case "14_draftbox":
+    case "13_draftbox":
       lines.push(chalk.cyan("✅ 已发布到草稿箱"));
       if (state.outputPath) {
         lines.push(chalk.green(`  输出目录: ${state.outputPath}`));
@@ -219,9 +206,8 @@ async function showFullOutput(nodeName: string, state: ArticleState): Promise<vo
     "01_research": state.researchResult,
     "02_rag": state.ragContent,
     "05_draft": state.draft,
-    "06_polish": state.polished,
-    "07_rewrite": state.rewritten,
-    "09_humanize": state.humanized,
+    "06_rewrite": state.rewritten,
+    "08_humanize": state.humanized,
   };
 
   const content = outputMap[nodeName];

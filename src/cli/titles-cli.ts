@@ -104,7 +104,7 @@ async function main() {
         ragContent: "",
         titles: [],
         draft: "",
-        polished: "",
+        rewritten: "",
         humanized: "",
         imagePrompts: [],
         imagePaths: [],
