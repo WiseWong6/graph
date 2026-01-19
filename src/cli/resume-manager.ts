@@ -23,6 +23,7 @@ type GraphType = CompiledStateGraph<any, any, any, any, any, any, any, any, any>
 // 节点名称映射（中文友好）
 const NODE_NAMES: Record<string, string> = {
   "gate_a_select_wechat": "选择公众号",
+  "gate_a_select_model": "选择模型",
   "01_research": "调研",
   "02_rag": "RAG 检索",
   "03_titles": "生成标题",

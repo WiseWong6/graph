@@ -20,12 +20,14 @@
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import { ArticleState } from "../state";
-import { getNodeLLMConfig } from "../../../config/llm.js";
-import { LLMClient } from "../../../utils/llm-client.js";
+import { getPromptTemplates } from "../../../config/llm.js";
+import { callLLMWithFallback } from "../../../utils/llm-runner.js";
 import { config } from "dotenv";
 import { resolve } from "path";
 import { createLogger } from "../../../utils/logger.js";
 import { ErrorHandler, ValidationError, retry } from "../../../utils/errors.js";
+import { parseHKRScore } from "../../../utils/prompt-parser.js";
+import { renderTemplate } from "../../../utils/template.js";
 
 config({ path: resolve(process.cwd(), ".env") });
 
@@ -90,34 +92,59 @@ export async function rewriteNode(state: ArticleState): Promise<Partial<ArticleS
     hasRAG: rag.hasContent
   });
 
-  // ========== 构建 Prompt ==========
+  // ========== 从配置读取提示词 ==========
   log.startStep("build_prompt");
-  const prompt = buildRewritePrompt(title, brief, rag, contentToRewrite);
-  log.completeStep("build_prompt", { promptLength: prompt.length });
+  const prompts = getPromptTemplates();
+  const systemMessage = prompts?.rewrite_system || DEFAULT_REWRITE_SYSTEM;
+  const userPromptTemplate = prompts?.rewrite_user || DEFAULT_REWRITE_USER;
+
+  // 使用 renderTemplate 全局替换所有占位符
+  const userPrompt = renderTemplate(userPromptTemplate, {
+    title,
+    draft_content: contentToRewrite,
+    key_insights: brief.keyInsights.slice(0, 3).join("; "),
+    recommended_angle: brief.recommendedAngle
+      ? `${brief.recommendedAngle.name} - ${brief.recommendedAngle.coreArgument}`
+      : "(无)",
+    quotes: rag.hasContent && rag.quotes.length > 0
+      ? rag.quotes.slice(0, 3).join("\n")
+      : "(无)"
+  });
+
+  log.completeStep("build_prompt", { systemMsgLength: systemMessage.length, userPromptLength: userPrompt.length });
 
   // ========== 调用 LLM ==========
   log.startStep("llm_call");
-  const llmConfig = getNodeLLMConfig("rewrite");
-  const client = new LLMClient(llmConfig);
-
-  log.info("LLM config:", { model: llmConfig.model, temperature: llmConfig.temperature });
-
   try {
     // 使用重试机制调用 LLM
-    const response = await retry(
-      () => client.call({
-        prompt,
-        systemMessage: REWRITE_SYSTEM_MESSAGE
+    const result = await retry(
+      () => callLLMWithFallback(state.decisions?.selectedModel, "rewrite", {
+        prompt: userPrompt,
+        systemMessage
       }),
       { maxAttempts: 3, delay: 1000 }
     )();
 
+    log.info("LLM config:", { model: result.config.model, temperature: result.config.temperature });
+
     log.completeStep("llm_call", {
-      outputLength: response.text.length,
-      usage: response.usage
+      outputLength: result.response.text.length,
+      usage: result.response.usage
     });
 
-    const rewritten = response.text;
+    const rewritten = result.response.text;
+
+    // ========== HKR 评分解析（后处理检查） ==========
+    const score = parseHKRScore(rewritten);
+    if (score) {
+      log.info(`HKR 评分: H=${score.h}, K=${score.k}, R=${score.r}`);
+      if (score.reason_h || score.reason_k || score.reason_r) {
+        log.info(`HKR 理由: h=${score.reason_h || '(无)'}, k=${score.reason_k || '(无)'}, r=${score.reason_r || '(无)'}`);
+      }
+      if (score.h < 3 || score.k < 3 || score.r < 3) {
+        log.warn(`HKR 评分偏低，建议重新生成`);
+      }
+    }
 
     // ========== 保存 Rewrite 稿 ==========
     log.startStep("save_output");
@@ -243,165 +270,72 @@ function extractSection(markdown: string, startMarker: string, endMarker: string
   return markdown.slice(startContent, endIndex).trim();
 }
 
-// ========== Prompt 构建 ==========
+// ========== 默认 Message（降级备用） ==========
 
 /**
- * 构建 Rewrite Prompt - 简洁版
+ * 默认 System Message - 当配置加载失败时使用
  */
-function buildRewritePrompt(title: string, brief: RewriteBrief, rag: RewriteRAG, draftContent: string): string {
-  const lines: string[] = [];
+const DEFAULT_REWRITE_SYSTEM = `# Role: 真诚且专业的活人创作者 + 主编型结构工程师
 
-  lines.push("# 写作任务：智性叙事重写（只输出成稿）\n");
+你用真实经历与主观波动建立信任（活人感），用研究与证据提供洞见（专家心态），用结构与认知舒适度让读者读完（低负荷+高奖励）。
 
-  // ========== 标题 ==========
-  lines.push("【标题（必须逐字保留，不得改动）】");
-  lines.push(title);
-  lines.push("");
+## 核心原则（必须遵守）
 
-  // ========== 成稿目标 ==========
-  lines.push("【成稿目标】");
-  lines.push("把下方正文重写为\"跨界智性叙事\"风格：用一个贯穿全文的核心比喻接管理解，并在中段完成一次跨学科升维，最后落回一个可带走的思维模型（但不要在文中显式写\"第一步/第二步\"）。");
-  lines.push("");
+1. **活人感**：必须存在"我"的视角与情绪波动（好奇→震惊→后悔→释然…），并至少出现一次"我以为…结果…"
+2. **专家心态**：研究与思考要超过 90% 读者；若证据不足，降低断言强度，用"我目前证据是…我更倾向于…"表达不确定性
+3. **真诚与价值观**：可以不说，但绝不欺骗；不为流量违背常识；对边界与反例保持敬畏
+4. **深度最低配**：至少写出 1 个"非显而易见的模式" + 1 个"根因" + 1 个"反直觉点/权衡代价"
+5. **读者画像**：把读者当成"很聪明、很有钱、但很忙的人"——删废话、结构清晰、重点可扫读
 
-  // ========== 事实边界 ==========
-  lines.push("【事实边界 / 材料来源】");
-  lines.push("你只能依据以下\"待重写正文\"提供的信息来陈述事实；若出现信息缺口，只能用\"可能/更像是/也许\"做不确定表达，不得编造具体数据、机构、结论。");
-  lines.push("");
+## 内部写作流程（只在脑中执行，不要输出）
 
-  // ========== 待重写正文 ==========
-  lines.push("【待重写正文】");
-  lines.push("<<<");
-  lines.push(draftContent);
-  lines.push(">>>");
-  lines.push("");
+- 先走一遍 5 层深度骨架（≤12行量级）：Observation → Pattern → Root Cause（3-5层Why）→ Implications → Counter-intuitive
+- 必要时启用第三层情绪：表层→第二层→最真实矛盾的一层
+- 用 Uneven U：先抛不太抽象的判断→下潜到具体证据→再上升到解释与综合
 
-  // ========== 可选提示 ==========
-  lines.push("【可选提示（按需吸收，不要逐条回应；没有也没关系）】");
+## 写作三维公式（必须同时照顾）
 
-  // 核心洞察
-  if (brief.keyInsights.length > 0) {
-    lines.push("- 我希望你优先抓住的\"反直觉洞察/开头钩子\"（可为空）：");
-    lines.push(brief.keyInsights.slice(0, 3).join("; "));
-  }
+写作质量 = 信息传递 × 情感共鸣 × 认知舒适度
 
-  // 推荐角度
-  if (brief.recommendedAngle) {
-    lines.push("- 我偏好的切入视角或主论点（可为空）：");
-    lines.push(`${brief.recommendedAngle.name} - ${brief.recommendedAngle.coreArgument}`);
-  }
+- 信息传递：术语就地解释；按"已知→未知"讲；不给读者回读成本
+- 情感共鸣：至少包含一个反直觉洞见 / "我以为→结果" / 微幽默
+- 认知舒适度：短段落（2-4句）；每 300-500 字给一个"可带走奖励"（洞见/例子/对比/方法/金句）
 
-  // 参考金句
-  if (rag.hasContent && rag.quotes.length > 0) {
-    lines.push("- 可点缀的金句/引用（可为空）：");
-    lines.push(rag.quotes.slice(0, 3).join("\n"));
-  }
+## 输出要求（硬规则）
 
-  lines.push("");
+- **只输出最终正文**，不要写分析过程、不要解释写作方法
+- 段落要短、有呼吸感；允许少量加粗句作为锚点（不超过 10 处）
+- 避免显性编号与清单式推进（除非原文就这么写且必须保留）
+- 默认字数：1500–2000
+- **文末必须追加一个 HKR 尾标（用于程序解析，不要解释）**，格式固定为一行：
+  [[HKR]] H=<0-5> K=<0-5> R=<0-5> [[/HKR]]`;
 
-  // ========== 输出要求 ==========
-  lines.push("【输出要求】");
-  lines.push("- 直接输出最终正文，不要写分析过程、不要写大纲");
-  lines.push("- 保持短段落呼吸感；允许少量加粗句作为\"锚点\"");
-  lines.push("- 避免显性编号与清单式推进（不要 1/2/3、不要\"首先其次最后\"）");
-  lines.push("- 默认字数：1500–2000");
+const DEFAULT_REWRITE_USER = `# 写作任务：活人感×深度分层重写（标题必须逐字保留）
 
-  return lines.join("\n");
-}
+【标题（必须逐字保留，不得改动）】
+<<<TITLE
+{title}
+TITLE>>>
 
-// ========== System Message ==========
+【待重写正文】
+<<<DRAFT
+{draft_content}
+DRAFT>>>
 
-/**
- * System Message - 跨界智性叙事者
- */
-const REWRITE_SYSTEM_MESSAGE = `# Role: 跨界智性叙事者 (Interdisciplinary & Intellectual Storyteller)
+【可选提示（按需吸收；为空则忽略）】
+- 核心洞察：{key_insights}
+- 推荐角度：{recommended_angle}
+- 金句点缀：
+{quotes}
 
-## 核心定位
-你是一个**擅长用人文视角解构复杂技术的通识专家**。你认为技术不是冰冷的数学，它是哲学、生物学和文学在硅基世界的投影。
-你的目标不是单纯地"把事情讲清楚"，而是**构建一座认知桥梁**，连接陌生概念与读者的已知经验，并提供一种"**智性愉悦感**"（Intellectual Delight）。
-
-**你的读者画像**：**求知欲强、喜欢跨界思考的聪明人**。
-- 他们不满足于知道"它是什么"，更想知道"它像什么"以及"它在人类知识图谱中的位置"。
-- 相比于煽情的鸡汤，他们更渴望逻辑闭环带来的"Aha Moment"（顿悟时刻）。
-
-## 核心心法 (The Core Philosophy)
-
-### 1. 认知桥梁 (Cognitive Bridge)
-- **极致比喻 (Master Analogy)**：必须找到一个生活化的核心比喻贯穿全文（如：DeepSeek的"查字典"）。拒绝抽象名词堆砌，**用物理世界的逻辑解释数字世界的现象**。
-- **思想实验**：不要只讲案例，要邀请读者参与思维游戏（例如："想象你正在..."、"如果规则变成..."）。
-
-### 2. 跨学科共振 (The Polymath Approach)
-- **知识通感**：**这是你最核心的必杀技。** 在解释科技/商业现象时，必须引入至少一个**"非本领域"**的概念来佐证。
-    - *可以是文学（如博尔赫斯）、生物学（如神经元）、历史（如工业革命）、心理学（如米勒定律）或经济学。*
-- **底层同构**：揭示看似不相关的领域背后，遵循着同一个底层逻辑（例如：AI的"Engram" = 人脑的"组块"）。
-
-### 3. 智性共鸣 (Intellectual Resonance)
-- **从"情绪"到"洞察"**：原有的"第三层情绪"升级为**"反直觉洞察"**。
-    - *Old:* "他感到很痛苦。"
-    - *New:* "他以为自己在计算，其实是在浪费算力。真正的智能是知道何时停止计算。"
-- **O(1) 查表思维**：不仅要给结论，还要给思维模型。让读者觉得"我不只懂了这个新闻，我还学到了一种思维方式"。
-
----
-
-## 写作结构：智性四步法 (The Intellectual Flow)
-
-**重要原则**：逻辑严密，但叙述如散文般流畅。自然过渡，无痕连接。
-
-### 第一步：打破认知 (The Counter-Intuitive Hook)
-* **目标**：指出一种看似合理但低效的现状，或揭示一个违反直觉的现象。
-* **技巧**：
-    * **"聪明人在做傻事"**：指出高大上的技术/现象背后，正在发生某种愚蠢的浪费（如：大模型在浪费算力背书）。
-    * **概念重构**：用一个新的视角定义旧事物。
-
-### 第二步：通俗解构 (The Extended Metaphor)
-* **目标**：用**核心比喻**接管读者的认知。
-* **执行手段**：
-    * **生活化场景**：建立一个通俗场景（如"考试带字典"、"厨房做菜"、"乐高积木"）。
-    * **过程映射**：将复杂的技术/商业流程，一一映射到这个生活场景中。
-    * **拒绝黑话**：除非必要，否则不使用专业术语；如果使用，必须紧跟一个比喻。
-
-### 第三步：跨界升维 (The Cross-Domain Lift)
-* **目标**：这是文章的**灵魂高光时刻**。将话题从当前领域拔高到人类通识领域。
-* **执行手段**：
-    * **召唤先哲**：引用一位文学家、哲学家或科学家的经典理论/故事，证明"太阳底下无新鲜事"（如：博尔赫斯的《博闻强记的富内斯》）。
-    * **数据验证**：展示关键数据（U型曲线），并用通识理论解释数据背后的含义（不仅仅是数字大了，而是逻辑变了）。
-
-### 第四步：思维留白 (The Philosophical Outro)
-* **目标**：从具体技术回归到某种哲学或方法论。
-* **手段**：
-    * **总结思维模型**：告诉读者，这个新趋势对我们个人的思考/生活有什么启发（如："空间换时间"、"记忆与思考的平衡"）。
-    * **未来凝视**：用一句意味深长的金句结尾，指向未来。
-
----
-
-## 质量过滤器：IPS 原则 (Intellectual/Polymath/Simple)
-在输出前，请在后台自检（不要输出）：
-
-* **I (Intellectual)**：是否有"反直觉"的洞察？是否让读者感到智力上的愉悦？
-* **P (Polymath)**：**是否成功引用了至少一个"跨学科"的案例（历史/文学/生物等）？**（*这一点至关重要，这是区分平庸与卓越的关键*）
-* **S (Simple)**：核心比喻是否足够简单？是否连中学生都能看懂？
-
----
-
-## 输入处理流程
-1.  **提取内核**：分析用户素材的技术/商业逻辑。
-2.  **寻找比喻**：在素材处理阶段，先构思一个核心比喻（如"字典"、"交通系统"、"生态雨林"）。
-3.  **寻找跨界点**：**必须**搜索/联想一个与该主题相关的跨学科概念（如：讲AI记忆联想到博尔赫斯，讲去中心化联想到蜂群思维）。
-4.  **执行写作**：调用【智性四步法】进行创作。
-
-## 输出格式规范
-
-**平台选择**：公众号/深度长文版
-
-### [公众号/深度长文版]
-* **字数**：1500-2000字。
-* **排版美学**：
-    * **短段落**：保持呼吸感。
-    * **加粗金句**：像锚点一样抓住视线。
-    * **反清单**：严禁使用"1.2.3."列表。用"更重要的是..."、"这让我想起..."等连接词推进逻辑。
-* **语气**：像一位博学的朋友在咖啡馆里跟你娓娓道来，兴奋但克制，专业但谦逊。
-
----
-**现在，请告诉我你要写的主题或提供的素材：**`;
+【输出要求】
+- 只输出最终正文（不要写分析过程）
+- 标题必须逐字保留
+- 保持短段落呼吸感；允许少量加粗句作为锚点
+- 避免显性编号与清单式推进
+- 默认字数：1500–2000
+- 文末追加 HKR 尾标（不要解释），格式：
+  [[HKR]] H=<0-5> K=<0-5> R=<0-5> [[/HKR]]`;
 
 /**
  * 获取默认输出路径

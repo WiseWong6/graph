@@ -32,6 +32,7 @@ interface TimingSummary {
 // 节点信息映射
 const NODE_INFO: Record<string, { name: string; description: string; hasOutput: boolean; isInteractive: boolean }> = {
   "gate_a_select_wechat": { name: "选择公众号", description: "选择要发布的公众号账号", hasOutput: false, isInteractive: true },
+  "gate_a_select_model": { name: "选择模型", description: "选择要使用的 LLM 模型", hasOutput: false, isInteractive: true },
   "01_research": { name: "调研", description: "搜索并分析主题，生成 Brief", hasOutput: true, isInteractive: false },
   "02_rag": { name: "RAG 检索", description: "从知识库检索相关内容", hasOutput: true, isInteractive: false },
   "03_titles": { name: "生成标题", description: "基于 Brief 和 RAG 生成候选标题", hasOutput: true, isInteractive: false },
@@ -317,7 +318,7 @@ export async function main() {
 
     // 用户节点列表（用于过滤内部事件）
     const USER_NODES = new Set([
-      "gate_a_select_wechat", "01_research", "02_rag", "03_titles",
+      "gate_a_select_wechat", "gate_a_select_model", "01_research", "02_rag", "03_titles",
       "gate_c_select_title", "05_draft", "06_rewrite", "07_confirm",
       "08_humanize", "09_prompts", "10_images", "11_upload",
       "12_html", "13_draftbox", "end"

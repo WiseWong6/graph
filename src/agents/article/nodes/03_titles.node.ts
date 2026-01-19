@@ -14,9 +14,8 @@
  */
 
 import { ArticleState } from "../state";
-import { getNodeLLMConfig } from "../../../config/llm.js";
 import { getPromptTemplate } from "../../../config/llm.js";
-import { LLMClient } from "../../../utils/llm-client.js";
+import { callLLMWithFallback } from "../../../utils/llm-runner.js";
 import IndexManager from "../../../rag/index/index-manager.js";
 import { config } from "dotenv";
 import { resolve } from "path";
@@ -118,14 +117,16 @@ export async function titlesNode(state: ArticleState): Promise<Partial<ArticleSt
   const prompt = renderTemplate(userTemplate, vars);
 
   // ========== 5. 调用 LLM ==========
-  const llmConfig = getNodeLLMConfig("title_gen");
-  const client = new LLMClient(llmConfig);
-
-  console.log("[03_titles] Calling LLM with config:", llmConfig.model);
+  console.log("[03_titles] Calling LLM...");
 
   try {
-    const response = await client.call({ prompt, systemMessage });
+    const { response, config } = await callLLMWithFallback(
+      state.decisions?.selectedModel,
+      "title_gen",
+      { prompt, systemMessage }
+    );
 
+    console.log("[03_titles] LLM model:", config.model);
     console.log("[03_titles] LLM response received, parsing titles...");
 
     // ========== 6. 解析标题 ==========

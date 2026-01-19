@@ -15,8 +15,7 @@
  */
 
 import { ArticleState, ImageStyle } from "../state";
-import { getNodeLLMConfig } from "../../../config/llm.js";
-import { LLMClient } from "../../../utils/llm-client.js";
+import { callLLMWithFallback } from "../../../utils/llm-runner.js";
 import { config } from "dotenv";
 import { resolve } from "path";
 
@@ -87,21 +86,31 @@ export async function promptsNode(state: ArticleState): Promise<Partial<ArticleS
   const prompt = buildPromptPrompt(state.draft, count, style);
 
   // ========== 调用 LLM ==========
-  const llmConfig = getNodeLLMConfig("image_prompt");
-  const client = new LLMClient(llmConfig);
-
-  console.log("[10_prompts] Calling LLM with config:", llmConfig.model);
+  console.log("[10_prompts] Calling LLM...");
 
   try {
-    const response = await client.call({
-      prompt,
-      systemMessage: PROMPT_SYSTEM_MESSAGE
-    });
+    const { response, config } = await callLLMWithFallback(
+      state.decisions?.selectedModel,
+      "image_prompt",
+      { prompt, systemMessage: PROMPT_SYSTEM_MESSAGE }
+    );
 
+    console.log("[10_prompts] LLM model:", config.model);
     console.log("[10_prompts] Prompts generated");
 
     // ========== 解析提示词 ==========
+    // 添加原始响应日志（用于调试）
+    console.log("[10_prompts] LLM raw response (first 500 chars):", response.text.substring(0, 500));
+
     const prompts = parsePrompts(response.text);
+
+    // 验证解析结果，如果没有解析到任何提示词，使用降级方案
+    if (prompts.length === 0) {
+      console.warn("[10_prompts] No prompts parsed from LLM response, using fallback");
+      const fallbackPrompts = generateFallbackPrompts(count, style);
+      return { imagePrompts: fallbackPrompts };
+    }
+
     const promptStrings = prompts.map(p => p.prompt);
 
     console.log(`[10_prompts] Generated ${promptStrings.length} prompts:`);
@@ -221,27 +230,113 @@ const PROMPT_SYSTEM_MESSAGE = `你是一个专业的配图设计师,擅长为文
 
 /**
  * 解析 LLM 输出的提示词
+ *
+ * 解析策略（按优先级）：
+ * 1. 标准 JSON 数组：[{"prompt": "..."}, ...]
+ * 2. Markdown 代码块中的 JSON：```json [...] ```
+ * 3. 带引号的 JSON 数组："[...]" (需去除引号)
+ * 4. 对象数组（非标准格式）
  */
 function parsePrompts(text: string): ImagePrompt[] {
   const prompts: ImagePrompt[] = [];
 
   try {
-    // 尝试解析 JSON 数组
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    // 策略 1: 尝试解析标准 JSON 数组
+    let jsonMatch = text.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          for (const item of parsed) {
+            if (item.prompt) {
+              prompts.push({
+                paragraph_index: item.paragraph_index || 0,
+                paragraph_summary: item.paragraph_summary || "",
+                prompt: item.prompt,
+                style: item.style || "扁平化科普图",
+                mood: item.mood || "专业"
+              });
+            }
+          }
+          if (prompts.length > 0) return prompts;
+        }
+      } catch {
+        // 继续尝试其他策略
+      }
+    }
 
-      for (const item of parsed) {
-        if (item.prompt) {
-          prompts.push({
-            paragraph_index: item.paragraph_index || 0,
-            paragraph_summary: item.paragraph_summary || "",
-            prompt: item.prompt,
-            style: item.style || "扁平化科普图",
-            mood: item.mood || "专业"
-          });
+    // 策略 2: 尝试从 Markdown 代码块中提取 JSON
+    const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    if (codeBlockMatch) {
+      try {
+        const parsed = JSON.parse(codeBlockMatch[1]);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (item.prompt) {
+              prompts.push({
+                paragraph_index: item.paragraph_index || 0,
+                paragraph_summary: item.paragraph_summary || "",
+                prompt: item.prompt,
+                style: item.style || "扁平化科普图",
+                mood: item.mood || "专业"
+              });
+            }
+          }
+          if (prompts.length > 0) return prompts;
+        }
+      } catch {
+        // 继续尝试其他策略
+      }
+    }
+
+    // 策略 3: 尝试解析带引号的 JSON 数组（某些 LLM 可能返回带引号的字符串）
+    const quotedMatch = text.match(/"(\[[\s\S]*\])"/);
+    if (quotedMatch) {
+      try {
+        const parsed = JSON.parse(quotedMatch[1]);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (item.prompt) {
+              prompts.push({
+                paragraph_index: item.paragraph_index || 0,
+                paragraph_summary: item.paragraph_summary || "",
+                prompt: item.prompt,
+                style: item.style || "扁平化科普图",
+                mood: item.mood || "专业"
+              });
+            }
+          }
+          if (prompts.length > 0) return prompts;
+        }
+      } catch {
+        // 继续尝试其他策略
+      }
+    }
+
+    // 策略 4: 尝试提取所有类 JSON 对象（非标准格式容错）
+    const objectMatches = text.match(/\{[^{}]*"prompt"[^{}]*\}/g);
+    if (objectMatches) {
+      for (const objStr of objectMatches) {
+        try {
+          const item = JSON.parse(objStr);
+          if (item.prompt) {
+            prompts.push({
+              paragraph_index: item.paragraph_index || 0,
+              paragraph_summary: item.paragraph_summary || "",
+              prompt: item.prompt,
+              style: item.style || "扁平化科普图",
+              mood: item.mood || "专业"
+            });
+          }
+        } catch {
+          // 忽略单个对象解析失败
         }
       }
+      if (prompts.length > 0) return prompts;
+    }
+
+    if (prompts.length === 0) {
+      console.warn("[10_prompts] All parsing strategies failed, response format may be invalid");
     }
   } catch (error) {
     console.error(`[10_prompts] Failed to parse prompts: ${error}`);

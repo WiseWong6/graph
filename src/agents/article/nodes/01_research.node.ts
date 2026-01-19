@@ -15,8 +15,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { resolve, join } from "path";
 import { ArticleState } from "../state";
-import { getNodeLLMConfig } from "../../../config/llm.js";
-import { LLMClient } from "../../../utils/llm-client.js";
+import { callLLMWithFallback } from "../../../utils/llm-runner.js";
 
 // 辅助工具
 import {
@@ -74,7 +73,11 @@ export async function researchNode(state: ArticleState): Promise<Partial<Article
 
   // ========== 步骤 3: 使用 LLM 分析结果（重构版） ==========
   console.log("[01_research] Step 3: Analyzing with LLM...");
-  const analysisResult = await analyzeWithLLM(inputDetection.topic, searchResults);
+  const analysisResult = await analyzeWithLLM(
+    inputDetection.topic,
+    searchResults,
+    state.decisions?.selectedModel  // 传递用户选择的模型 ID
+  );
 
   // 计算置信度
   for (const finding of analysisResult.findings) {
@@ -239,7 +242,8 @@ async function analyzeWithLLM(
     title: string;
     url: string;
     description?: string;
-  }>
+  }>,
+  selectedModelId?: string  // 新增：用户选择的模型 ID
 ): Promise<{
   findings: Finding[];
   key_insights?: string[];
@@ -265,9 +269,6 @@ async function analyzeWithLLM(
     console.log("[01_research] No search results to analyze");
     return { findings: [] };
   }
-
-  const llmConfig = getNodeLLMConfig("research");
-  const client = new LLMClient(llmConfig);
 
   // 构建分析 Prompt（重构版 - 11 部分结构化报告）
   const searchResultsText = searchResults
@@ -389,7 +390,7 @@ ${searchResultsText}
 3. 数据和观点必须来自搜索结果，不要编造`;
 
   try {
-    const response = await client.call({
+    const { response } = await callLLMWithFallback(selectedModelId, "research", {
       prompt,
       systemMessage: "你是一位资深的内容创作调研专家。输出完整的 Markdown 调研报告，确保结构清晰、内容详实。"
     });

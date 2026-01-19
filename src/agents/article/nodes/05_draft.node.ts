@@ -15,8 +15,7 @@
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import { ArticleState } from "../state";
-import { getNodeLLMConfig } from "../../../config/llm.js";
-import { LLMClient } from "../../../utils/llm-client.js";
+import { callLLMWithFallback } from "../../../utils/llm-runner.js";
 import { config } from "dotenv";
 import { resolve } from "path";
 
@@ -90,17 +89,19 @@ export async function draftNode(state: ArticleState): Promise<Partial<ArticleSta
   const prompt = buildDraftPrompt(title, brief, rag);
 
   // ========== 调用 LLM ==========
-  const llmConfig = getNodeLLMConfig("draft");
-  const client = new LLMClient(llmConfig);
-
-  console.log("[05_draft] Calling LLM with config:", llmConfig.model);
+  console.log("[05_draft] Calling LLM...");
 
   try {
-    const response = await client.call({
+    const { response, config } = await callLLMWithFallback(
+      state.decisions?.selectedModel,
+      "draft",
+      {
       prompt,
       systemMessage: DRAFT_SYSTEM_MESSAGE
-    });
+      }
+    );
 
+    console.log("[05_draft] LLM model:", config.model);
     console.log("[05_draft] Draft generated, length:", response.text.length);
     console.log("[05_draft] Usage:", response.usage);
 

@@ -49,6 +49,7 @@ export interface LLMCallOptions {
   systemMessage?: string;
   maxTokens?: number;
   temperature?: number;
+  stream?: boolean;
 }
 
 // Unified LLM response - normalized output
@@ -84,6 +85,7 @@ export class LLMClient {
     const provider = this.config.provider;
 
     switch (provider) {
+      case "doubao":
       case "openai":
       case "deepseek":
         return await this.callOpenAICompatible(options);
@@ -104,6 +106,7 @@ export class LLMClient {
     const provider = this.config.provider;
 
     switch (provider) {
+      case "doubao":
       case "openai":
       case "deepseek":
         yield* this.streamOpenAICompatible(options);
@@ -121,9 +124,15 @@ export class LLMClient {
    */
   private async *streamOpenAICompatible(options: LLMCallOptions): AsyncGenerator<StreamChunk> {
     const apiKey = this.getApiKey(
-      this.config.api_key_env || (this.config.provider === "deepseek" ? "DEEPSEEK_API_KEY" : "OPENAI_API_KEY")
+      this.config.api_key_env ||
+      (this.config.provider === "deepseek" ? "DEEPSEEK_API_KEY" :
+       this.config.provider === "doubao" ? "DOUBAO_API_KEY" :
+       "OPENAI_API_KEY")
     );
-    const baseURL = this.config.base_url || (this.config.provider === "deepseek" ? "https://api.deepseek.com" : "https://api.openai.com/v1");
+    const baseURL = this.config.base_url ||
+      (this.config.provider === "deepseek" ? "https://api.deepseek.com" :
+       this.config.provider === "doubao" ? "https://ark.cn-beijing.volces.com/api/v3" :
+       "https://api.openai.com/v1");
 
     const client = new OpenAI({ apiKey, baseURL });
 
@@ -165,13 +174,21 @@ export class LLMClient {
    */
   private async callOpenAICompatible(options: LLMCallOptions): Promise<LLMResponse> {
     const apiKey = this.getApiKey(
-      this.config.api_key_env || (this.config.provider === "deepseek" ? "DEEPSEEK_API_KEY" : "OPENAI_API_KEY")
+      this.config.api_key_env ||
+      (this.config.provider === "deepseek" ? "DEEPSEEK_API_KEY" :
+       this.config.provider === "doubao" ? "DOUBAO_API_KEY" :
+       "OPENAI_API_KEY")
     );
-    const baseURL = this.config.base_url || (this.config.provider === "deepseek" ? "https://api.deepseek.com" : "https://api.openai.com/v1");
+    const baseURL = this.config.base_url ||
+      (this.config.provider === "deepseek" ? "https://api.deepseek.com" :
+       this.config.provider === "doubao" ? "https://ark.cn-beijing.volces.com/api/v3" :
+       "https://api.openai.com/v1");
 
-    // Calculate timeout: node config timeout (ms) * 2 for DeepSeek reasoning, or default 120s
-    // DeepSeek Reasoner may take up to 60s for thinking alone
-    const timeoutMs = this.config.provider === "deepseek"
+    // Calculate timeout: provider-specific multipliers for reasoning models
+    // DeepSeek Reasoner and Doubao Thinking may take up to 60s for thinking alone
+    const isReasoningProvider = this.config.provider === "deepseek" ||
+      (this.config.provider === "doubao" && this.config.thinking?.type !== "disabled");
+    const timeoutMs = isReasoningProvider
       ? (this.config.timeout || 120000) * 2
       : (this.config.timeout || 120000);
 
@@ -191,7 +208,10 @@ export class LLMClient {
     // DeepSeek Reasoner 使用流式输出（仅 reasoner 模型）
     const isDeepSeekReasoner = this.config.provider === "deepseek" && this.config.model.includes("reasoner");
 
-    if (isDeepSeekReasoner) {
+    // Doubao 深度思考模型也使用流式输出（thinking.type !== "disabled"）
+    const isDoubaoThinking = this.config.provider === "doubao" && this.config.thinking?.type !== "disabled";
+
+    if (isDeepSeekReasoner || isDoubaoThinking) {
       return await this.callDeepSeekStreaming(client, messages, options);
     }
 
@@ -222,8 +242,8 @@ export class LLMClient {
   }
 
   /**
-   * DeepSeek Reasoner 流式输出
-   * 仅用于 deepseek-reasoner 模型（支持 reasoning_content 字段）
+   * DeepSeek Reasoner / Doubao Thinking 流式输出
+   * 支持返回 reasoning_content 字段的模型
    * 逐字显示思考过程和最终内容
    * 使用互斥锁防止并行执行时输出交错
    */
@@ -232,22 +252,36 @@ export class LLMClient {
     messages: OpenAI.ChatCompletionMessageParam[],
     options: LLMCallOptions
   ): Promise<LLMResponse> {
-    const stream = await client.chat.completions.create({
+    // 构建流式请求参数
+    const streamParams: any = {
       model: this.config.model,
       messages,
       max_tokens: options.maxTokens || this.config.max_tokens || 4096,
       temperature: options.temperature || this.config.temperature || 0.7,
       stream: true,
-    });
+    };
+
+    // Doubao 深度思考：通过 extra_body 传递 thinking 参数
+    if (this.config.provider === "doubao" && this.config.thinking) {
+      streamParams.extra_body = {
+        thinking: this.config.thinking
+      };
+    }
+
+    const stream = await client.chat.completions.create(streamParams) as unknown as AsyncIterable<OpenAI.ChatCompletionChunk>;
+
+    // 判断模型类型（用于日志显示）
+    const isDeepSeek = this.config.provider === "deepseek";
+    const providerName = isDeepSeek ? "DeepSeek" : "Doubao";
 
     let reasoningContent = "";
     let responseContent = "";
     let inReasoning = false;
 
-    console.log("[LLMClient] 💭 DeepSeek Thinking:");
+    console.log(`[LLMClient] 💭 ${providerName} Thinking:`);
 
     for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta as any; // DeepSeek 特有字段
+      const delta = chunk.choices[0]?.delta as any; // DeepSeek/Doubao 特有字段
 
       // 处理推理内容（思考过程）
       if (delta?.reasoning_content) {
@@ -267,7 +301,7 @@ export class LLMClient {
       if (delta?.content) {
         if (inReasoning) {
           console.log(); // 思考结束，换行
-          console.log("[LLMClient] ✍️  DeepSeek Response:");
+          console.log(`[LLMClient] ✍️  ${providerName} Response:`);
           inReasoning = false;
         }
         const text = delta.content;

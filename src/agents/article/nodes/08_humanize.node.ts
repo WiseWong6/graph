@@ -20,8 +20,7 @@
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import { ArticleState } from "../state";
-import { getNodeLLMConfig } from "../../../config/llm.js";
-import { LLMClient } from "../../../utils/llm-client.js";
+import { callLLMWithFallback } from "../../../utils/llm-runner.js";
 import { config } from "dotenv";
 import { resolve } from "path";
 import { createLogger } from "../../../utils/logger.js";
@@ -62,27 +61,24 @@ export async function humanizeNode(state: ArticleState): Promise<Partial<Article
 
   // ========== 调用 LLM ==========
   log.startStep("llm_call");
-  const llmConfig = getNodeLLMConfig("humanize");
-  const client = new LLMClient(llmConfig);
-
-  log.info("LLM config:", { model: llmConfig.model, temperature: llmConfig.temperature });
-
   try {
     // 使用重试机制调用 LLM
-    const response = await retry(
-      () => client.call({
+    const result = await retry(
+      () => callLLMWithFallback(state.decisions?.selectedModel, "humanize", {
         prompt,
         systemMessage: HUMANIZE_SYSTEM_MESSAGE
       }),
       { maxAttempts: 3, delay: 1000 }
     )();
 
+    log.info("LLM config:", { model: result.config.model, temperature: result.config.temperature });
+
     log.completeStep("llm_call", {
-      outputLength: response.text.length,
-      usage: response.usage
+      outputLength: result.response.text.length,
+      usage: result.response.usage
     });
 
-    let humanized = response.text;
+    let humanized = result.response.text;
     const boldResult = restoreBoldMarkers(humanized, input);
     humanized = boldResult.text;
     if (boldResult.restored > 0) {

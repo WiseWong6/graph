@@ -12,6 +12,7 @@ import { endNode } from "./nodes/03_end.node";
 
 // 导入交互节点 (v2)
 import { selectWechatNode } from "./nodes/00_select_wechat.node";
+import { selectModelNode } from "./nodes/00_select_model.node";
 import { selectTitleNode } from "./nodes/04_select_title.node";
 
 // 导入完整流程节点 (v2)
@@ -133,10 +134,10 @@ export const interactiveGraph = interactiveTestWorkflow.compile({ checkpointer }
 /**
  * 完整 Article Agent 工作流 (v2)
  *
- * 13 节点完整流程（删除 Polish）:
+ * 14 节点完整流程（新增 select_model）：
  *
  * 前置流程:
- * START → Gate A (选公众号) → 01_research
+ * START → Gate A (选公众号) → Gate A.5 (选模型) → 01_research
  *
  * 第一层并行（Research 后）:
  *   01_research ─┬─→ 02_rag (RAG 检索)
@@ -155,7 +156,7 @@ export const interactiveGraph = interactiveTestWorkflow.compile({ checkpointer }
  * 12_html → 13_draftbox → end → END
  *
  * 节点分类:
- * - 交互节点 (3): select_wechat, select_title, confirm
+ * - 交互节点 (4): select_wechat, select_model, select_title, confirm
  * - LLM 节点 (6): research, rag, titles, draft, rewrite, humanize, prompts
  * - 代码节点 (4): images, upload, html, draftbox, end
  *
@@ -169,6 +170,7 @@ export const interactiveGraph = interactiveTestWorkflow.compile({ checkpointer }
 const fullArticleWorkflow = new StateGraph(ArticleAnnotation)
   // 交互节点
   .addNode("gate_a_select_wechat", selectWechatNode)
+  .addNode("gate_a_select_model", selectModelNode)
 
   // LLM 节点
   .addNode("01_research", researchNode)
@@ -194,7 +196,8 @@ const fullArticleWorkflow = new StateGraph(ArticleAnnotation)
   // 定义流程连接
   // 前置流程
   .addEdge(START, "gate_a_select_wechat")
-  .addEdge("gate_a_select_wechat", "01_research")
+  .addEdge("gate_a_select_wechat", "gate_a_select_model")
+  .addEdge("gate_a_select_model", "01_research")
 
   // 第一层并行：Research 后，RAG 和 Titles 同时执行
   .addEdge("01_research", "02_rag")
