@@ -33,19 +33,20 @@ interface TimingSummary {
 const NODE_INFO: Record<string, { name: string; description: string; hasOutput: boolean; isInteractive: boolean }> = {
   "gate_a_select_wechat": { name: "选择公众号", description: "选择要发布的公众号账号", hasOutput: false, isInteractive: true },
   "gate_a_select_model": { name: "选择模型", description: "选择要使用的 LLM 模型", hasOutput: false, isInteractive: true },
-  "01_research": { name: "调研", description: "搜索并分析主题，生成 Brief", hasOutput: true, isInteractive: false },
-  "02_rag": { name: "RAG 检索", description: "从知识库检索相关内容", hasOutput: true, isInteractive: false },
-  "03_titles": { name: "生成标题", description: "基于 Brief 和 RAG 生成候选标题", hasOutput: true, isInteractive: false },
+  "02_research": { name: "调研", description: "搜索并分析主题，生成 Brief", hasOutput: true, isInteractive: false },
+  "03_rag": { name: "RAG 检索", description: "从知识库检索相关内容", hasOutput: true, isInteractive: false },
+  "04_titles": { name: "生成标题", description: "基于 Brief 和 RAG 生成候选标题", hasOutput: true, isInteractive: false },
   "gate_c_select_title": { name: "选择标题", description: "从候选标题中选择一个", hasOutput: false, isInteractive: true },
-  "05_draft": { name: "撰写初稿", description: "基于 Brief 和 RAG 撰写初稿", hasOutput: true, isInteractive: false },
-  "06_rewrite": { name: "智性叙事重写", description: "IPS 原则 + HKR 自检", hasOutput: true, isInteractive: false },
-  "07_confirm": { name: "确认图片配置", description: "确认图片数量和风格", hasOutput: false, isInteractive: true },
-  "08_humanize": { name: "人化", description: "去除 AI 味，增加活人感", hasOutput: true, isInteractive: false },
-  "09_prompts": { name: "生成图片提示词", description: "为每张图生成详细提示词", hasOutput: true, isInteractive: false },
-  "10_images": { name: "生成图片", description: "调用 Ark API 生成图片", hasOutput: true, isInteractive: false },
-  "11_upload": { name: "上传图片", description: "上传到微信 CDN", hasOutput: true, isInteractive: false },
-  "12_html": { name: "转换 HTML", description: "Markdown 转微信编辑器格式", hasOutput: true, isInteractive: false },
-  "13_draftbox": { name: "发布到草稿箱", description: "发布到微信公众号草稿箱", hasOutput: true, isInteractive: false },
+  "06_draft": { name: "撰写初稿", description: "基于 Brief 和 RAG 撰写初稿", hasOutput: true, isInteractive: false },
+  "07_rewrite": { name: "智性叙事重写", description: "IPS 原则 + HKR 自检", hasOutput: true, isInteractive: false },
+  "08_confirm": { name: "确认图片配置", description: "确认图片数量和风格", hasOutput: false, isInteractive: true },
+  "09_humanize": { name: "人化", description: "去除 AI 味，增加活人感", hasOutput: true, isInteractive: false },
+  "10_prompts": { name: "生成图片提示词", description: "为每张图生成详细提示词", hasOutput: true, isInteractive: false },
+  "11_images": { name: "生成图片", description: "调用 Ark API 生成图片", hasOutput: true, isInteractive: false },
+  "12_upload": { name: "上传图片", description: "上传到微信 CDN", hasOutput: true, isInteractive: false },
+  "13_wait_for_upload": { name: "等待上传完成", description: "并行同步点，等待图片上传完成", hasOutput: false, isInteractive: false },
+  "14_html": { name: "转换 HTML", description: "Markdown 转微信编辑器格式", hasOutput: true, isInteractive: false },
+  "15_draftbox": { name: "发布到草稿箱", description: "发布到微信公众号草稿箱", hasOutput: true, isInteractive: false },
   "end": { name: "完成", description: "清理和确认", hasOutput: false, isInteractive: false },
 };
 
@@ -81,11 +82,11 @@ async function showUserMenu(): Promise<"continue" | "view" | "quit"> {
  */
 async function showFullOutput(nodeName: string, state: ArticleState): Promise<void> {
   const outputMap: Record<string, string | null> = {
-    "01_research": state.researchResult,
-    "02_rag": state.ragContent,
-    "05_draft": state.draft,
-    "06_rewrite": state.rewritten,
-    "08_humanize": state.humanized,
+    "02_research": state.researchResult,
+    "03_rag": state.ragContent,
+    "06_draft": state.draft,
+    "07_rewrite": state.rewritten,
+    "09_humanize": state.humanized,
   };
 
   const content = outputMap[nodeName];
@@ -318,10 +319,10 @@ export async function main() {
 
     // 用户节点列表（用于过滤内部事件）
     const USER_NODES = new Set([
-      "gate_a_select_wechat", "gate_a_select_model", "01_research", "02_rag", "03_titles",
-      "gate_c_select_title", "05_draft", "06_rewrite", "07_confirm",
-      "08_humanize", "09_prompts", "10_images", "11_upload",
-      "12_html", "13_draftbox", "end"
+      "gate_a_select_wechat", "gate_a_select_model", "02_research", "03_rag", "04_titles",
+      "gate_c_select_title", "06_draft", "07_rewrite", "08_confirm",
+      "09_humanize", "10_prompts", "11_images", "12_upload",
+      "13_wait_for_upload", "14_html", "15_draftbox", "end"
     ]);
 
     for await (const event of eventStream) {

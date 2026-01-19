@@ -5,7 +5,7 @@
  * 单点测试标题生成，使用模拟 Brief 输入
  */
 
-import { titlesNode } from "../agents/article/nodes/03_titles.node.js";
+import { titlesNode } from "../agents/article/nodes/04_titles.node.js";
 import { createInterface } from "readline";
 
 // ANSI 颜色

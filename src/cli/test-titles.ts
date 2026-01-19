@@ -8,7 +8,7 @@
  */
 
 import inquirer from "inquirer";
-import { titlesNode } from "../agents/article/nodes/03_titles.node.js";
+import { titlesNode } from "../agents/article/nodes/04_titles.node.js";
 import { ArticleState } from "../agents/article/state.js";
 import { readFileSync } from "fs";
 import { join } from "path";

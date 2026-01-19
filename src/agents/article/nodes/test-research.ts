@@ -7,7 +7,7 @@
  * 3. 搜索结果质量
  */
 
-import { researchNode } from "./01_research.node.js";
+import { researchNode } from "./02_research.node.js";
 import type { ArticleState } from "../state.js";
 
 /**

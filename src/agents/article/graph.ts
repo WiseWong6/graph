@@ -12,23 +12,23 @@ import { endNode } from "./nodes/03_end.node";
 
 // 导入交互节点 (v2)
 import { selectWechatNode } from "./nodes/00_select_wechat.node";
-import { selectModelNode } from "./nodes/00_select_model.node";
-import { selectTitleNode } from "./nodes/04_select_title.node";
+import { selectModelNode } from "./nodes/01_select_model.node";
+import { selectTitleNode } from "./nodes/05_select_title.node";
 
 // 导入完整流程节点 (v2)
-import { researchNode } from "./nodes/01_research.node";
-import { ragNode } from "./nodes/02_rag.node";
-import { titlesNode } from "./nodes/03_titles.node";
-import { draftNode } from "./nodes/05_draft.node";
-import { rewriteNode } from "./nodes/06_rewrite.node";
-import { confirmImagesNode } from "./nodes/07_confirm.node";
-import { humanizeNode } from "./nodes/08_humanize.node";
-import { promptsNode } from "./nodes/09_prompts.node";
-import { imagesNode } from "./nodes/10_images.node";
-import { uploadImagesNode } from "./nodes/11_upload.node";
-import { waitForUploadNode } from "./nodes/wait_for_upload.node";
-import { htmlNode } from "./nodes/12_html.node";
-import { draftboxNode } from "./nodes/13_draftbox.node";
+import { researchNode } from "./nodes/02_research.node";
+import { ragNode } from "./nodes/03_rag.node";
+import { titlesNode } from "./nodes/04_titles.node";
+import { draftNode } from "./nodes/06_draft.node";
+import { rewriteNode } from "./nodes/07_rewrite.node";
+import { confirmImagesNode } from "./nodes/08_confirm.node";
+import { humanizeNode } from "./nodes/09_humanize.node";
+import { promptsNode } from "./nodes/10_prompts.node";
+import { imagesNode } from "./nodes/11_images.node";
+import { uploadImagesNode } from "./nodes/12_upload.node";
+import { waitForUploadNode } from "./nodes/13_wait_for_upload.node";
+import { htmlNode } from "./nodes/14_html.node";
+import { draftboxNode } from "./nodes/15_draftbox.node";
 
 /**
  * Checkpoint 配置
@@ -134,31 +134,34 @@ export const interactiveGraph = interactiveTestWorkflow.compile({ checkpointer }
 /**
  * 完整 Article Agent 工作流 (v2)
  *
- * 14 节点完整流程（新增 select_model）：
+ * 16 节点完整流程（00-15 连续编号）：
  *
  * 前置流程:
- * START → Gate A (选公众号) → Gate A.5 (选模型) → 01_research
+ * START → 00_select_wechat (选公众号) → 01_select_model (选模型) → 02_research
  *
  * 第一层并行（Research 后）:
- *   01_research ─┬─→ 02_rag (RAG 检索)
- *                └─→ 03_titles (标题生成)
+ *   02_research ─┬─→ 03_rag (RAG 检索)
+ *                └─→ 04_titles (标题生成)
  *                └─→ gate_c_select_title (等待两者完成)
  *
  * 中间流程:
- * gate_c_select_title → 05_draft → 06_rewrite
+ * gate_c_select_title → 06_draft → 07_rewrite
  *
  * 第二层并行（Rewrite 后）:
- *   06_rewrite ─┬─→ 07_confirm → 09_prompts → 10_images → 11_upload
- *               └─→ 08_humanize
- *               └─→ 12_html (汇聚点)
+ *   07_rewrite ─┬─→ 08_confirm → 10_prompts → 11_images → 12_upload → 13_wait_for_upload
+ *               └─→ 09_humanize
+ *               └─→ 14_html (汇聚点)
  *
  * 后续流程:
- * 12_html → 13_draftbox → end → END
+ * 14_html → 15_draftbox → end → END
  *
  * 节点分类:
- * - 交互节点 (4): select_wechat, select_model, select_title, confirm
- * - LLM 节点 (6): research, rag, titles, draft, rewrite, humanize, prompts
- * - 代码节点 (4): images, upload, html, draftbox, end
+ * - 交互节点 (4): 00_select_wechat, 01_select_model, 05_select_title, 08_confirm
+ * - LLM 节点 (7): 02_research, 03_rag, 04_titles, 06_draft, 07_rewrite, 09_humanize, 10_prompts
+ * - 代码节点 (5): 11_images, 12_upload, 13_wait_for_upload, 14_html, 15_draftbox
+ * - 终止节点 (1): end
+ *
+ * 总计: 17 个节点（含 end）
  *
  * 设计原则:
  * - 每个节点只做一件事
@@ -173,42 +176,42 @@ const fullArticleWorkflow = new StateGraph(ArticleAnnotation)
   .addNode("gate_a_select_model", selectModelNode)
 
   // LLM 节点
-  .addNode("01_research", researchNode)
-  .addNode("02_rag", ragNode)
-  .addNode("03_titles", titlesNode)
-  .addNode("05_draft", draftNode)
-  .addNode("06_rewrite", rewriteNode)
-  .addNode("08_humanize", humanizeNode)
-  .addNode("09_prompts", promptsNode)
+  .addNode("02_research", researchNode)
+  .addNode("03_rag", ragNode)
+  .addNode("04_titles", titlesNode)
+  .addNode("06_draft", draftNode)
+  .addNode("07_rewrite", rewriteNode)
+  .addNode("09_humanize", humanizeNode)
+  .addNode("10_prompts", promptsNode)
 
   // 交互节点
   .addNode("gate_c_select_title", selectTitleNode)
-  .addNode("07_confirm", confirmImagesNode)
+  .addNode("08_confirm", confirmImagesNode)
 
   // 代码节点
-  .addNode("10_images", imagesNode)
-  .addNode("11_upload", uploadImagesNode)
-  .addNode("wait_for_upload", waitForUploadNode)  // 并行同步点
-  .addNode("12_html", htmlNode)
-  .addNode("13_draftbox", draftboxNode)
+  .addNode("11_images", imagesNode)
+  .addNode("12_upload", uploadImagesNode)
+  .addNode("13_wait_for_upload", waitForUploadNode)  // 并行同步点
+  .addNode("14_html", htmlNode)
+  .addNode("15_draftbox", draftboxNode)
   .addNode("end", endNode)
 
   // 定义流程连接
   // 前置流程
   .addEdge(START, "gate_a_select_wechat")
   .addEdge("gate_a_select_wechat", "gate_a_select_model")
-  .addEdge("gate_a_select_model", "01_research")
+  .addEdge("gate_a_select_model", "02_research")
 
   // 第一层并行：Research 后，RAG 和 Titles 同时执行
-  .addEdge("01_research", "02_rag")
-  .addEdge("01_research", "03_titles")
+  .addEdge("02_research", "03_rag")
+  .addEdge("02_research", "04_titles")
 
   // 两者都完成后，才能选择标题（使用 join 边确保同步）
-  .addEdge(["02_rag", "03_titles"], "gate_c_select_title")
+  .addEdge(["03_rag", "04_titles"], "gate_c_select_title")
 
   // Gate C 条件边：根据用户选择决定下一步
-  // - 如果选择"重新生成标题"：回到 03_titles
-  // - 否则：继续到 05_draft
+  // - 如果选择"重新生成标题"：回到 04_titles
+  // - 否则：继续到 06_draft
   .addConditionalEdges(
     "gate_c_select_title",
     (state: typeof ArticleAnnotation.State) => {
@@ -218,34 +221,34 @@ const fullArticleWorkflow = new StateGraph(ArticleAnnotation)
       return "continue";
     },
     {
-      regenerate: "03_titles",
-      continue: "05_draft"
+      regenerate: "04_titles",
+      continue: "06_draft"
     }
   )
-  .addEdge("05_draft", "06_rewrite")
+  .addEdge("06_draft", "07_rewrite")
 
-  // 并行起点：从 06_rewrite 进入 confirm 节点
-  .addEdge("06_rewrite", "07_confirm")       // rewrite → confirm
+  // 并行起点：从 07_rewrite 进入 confirm 节点
+  .addEdge("07_rewrite", "08_confirm")       // rewrite → confirm
 
   // confirm 完成后，同时触发图片分支和文本分支（无条件并行）
-  // 图片分支：09_prompts → 10_images → 11_upload → wait_for_upload
-  // 文本分支：08_humanize
-  // 两个分支在 12_html 汇聚（LangGraph 自动等待所有入边完成）
-  .addEdge("07_confirm", "09_prompts")       // confirm → prompts（图片分支）
-  .addEdge("07_confirm", "08_humanize")      // confirm → humanize（文本分支）
+  // 图片分支：10_prompts → 11_images → 12_upload → 13_wait_for_upload
+  // 文本分支：09_humanize
+  // 两个分支在 14_html 汇聚（LangGraph 自动等待所有入边完成）
+  .addEdge("08_confirm", "10_prompts")       // confirm → prompts（图片分支）
+  .addEdge("08_confirm", "09_humanize")      // confirm → humanize（文本分支）
 
   // 图片流程：prompts → images → upload → wait_for_upload（并行同步点）
-  .addEdge("09_prompts", "10_images")
-  .addEdge("10_images", "11_upload")
-  .addEdge("11_upload", "wait_for_upload")
+  .addEdge("10_prompts", "11_images")
+  .addEdge("11_images", "12_upload")
+  .addEdge("12_upload", "13_wait_for_upload")
 
   // 汇聚点：html 等待 humanize 和 wait_for_upload 都完成（使用 join 边确保同步）
-  // wait_for_upload 只在 11_upload 完成后才触发，确保 12_html 在正确时机执行
-  .addEdge(["wait_for_upload", "08_humanize"], "12_html")
+  // wait_for_upload 只在 12_upload 完成后才触发，确保 14_html 在正确时机执行
+  .addEdge(["13_wait_for_upload", "09_humanize"], "14_html")
 
   // 后续节点
-  .addEdge("12_html", "13_draftbox")
-  .addEdge("13_draftbox", "end")
+  .addEdge("14_html", "15_draftbox")
+  .addEdge("15_draftbox", "end")
   .addEdge("end", END);
 
 /**

@@ -5,7 +5,7 @@
  * 真实交互体验，无 mock，无测试数据
  */
 
-import { researchNode } from "../agents/article/nodes/01_research.node.js";
+import { researchNode } from "../agents/article/nodes/02_research.node.js";
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { createInterface } from "readline";
