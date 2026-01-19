@@ -50,11 +50,35 @@ const NODE_INFO: Record<string, { name: string; description: string; hasOutput: 
   "end": { name: "完成", description: "清理和确认", hasOutput: false, isInteractive: false },
 };
 
-const STREAM_FOCUS_NODE = "09_humanize";
+/**
+ * 动态获取流式输出聚焦节点
+ * 支持两个并行场景：
+ * 1. Research 后：04_titles 是聚焦节点（缓冲 02_rag）
+ * 2. Confirm 后：09_humanize 是聚焦节点（缓冲 10_prompts/11_images/12_upload）
+ */
+const getStreamFocusNode = (currentNode: string): string | null => {
+  // Research 后并行：Titles 是聚焦节点，缓冲 RAG
+  if (currentNode === "04_titles" || currentNode === "03_rag") {
+    return "04_titles";
+  }
+
+  // Confirm 后并行：Humanize 是聚焦节点，缓冲 Prompts/Images
+  if (currentNode === "09_humanize" ||
+      currentNode === "10_prompts" ||
+      currentNode === "11_images" ||
+      currentNode === "12_upload" ||
+      currentNode === "13_wait_for_upload") {
+    return "09_humanize";
+  }
+
+  return null;
+};
+
 const DEFERRED_NODES_DURING_STREAM = new Set([
   "10_prompts", "11_images", "12_upload", "13_wait_for_upload"
 ]);
 const DEFERRED_LOG_PREFIXES = [
+  "[02_rag]",       // RAG 节点日志（Titles 聚焦时缓冲）
   "[10_prompts]",
   "[10_images]",
   "[11.5_upload]"
@@ -476,10 +500,22 @@ export async function main() {
   const originalLog = console.log.bind(console);
   const deferredLogs: Array<any[]> = [];
   const shouldBufferLog = (args: any[]): boolean => {
-    if (tracker.streamFocusNode !== STREAM_FOCUS_NODE) return false;
+    if (!tracker.streamFocusNode) return false;
     if (args.length === 0) return false;
     const first = String(args[0]);
-    return DEFERRED_LOG_PREFIXES.some(prefix => first.startsWith(prefix));
+
+    // 根据聚焦节点决定缓冲哪些日志
+    if (tracker.streamFocusNode === "04_titles") {
+      // Titles 聚焦时，只缓冲 RAG 日志
+      return first.startsWith("[02_rag]");
+    }
+
+    if (tracker.streamFocusNode === "09_humanize") {
+      // Humanize 聚焦时，缓冲 Prompts/Images 日志
+      return DEFERRED_LOG_PREFIXES.some(prefix => first.startsWith(prefix));
+    }
+
+    return false;
   };
   console.log = (...args: any[]) => {
     if (shouldBufferLog(args)) {
@@ -577,11 +613,15 @@ export async function main() {
           tracker.isWaitingForInteraction = true;
         }
 
-        if (nodeName === STREAM_FOCUS_NODE) {
-          tracker.streamFocusNode = nodeName;
+        // 动态设置聚焦节点
+        const focusNode = getStreamFocusNode(nodeName);
+        if (focusNode) {
+          tracker.streamFocusNode = focusNode;
         }
 
-        const shouldDeferOutput = tracker.streamFocusNode === STREAM_FOCUS_NODE &&
+        // 判断是否需要延迟输出（用于 Prompts/Images 并行场景）
+        // RAG 不在这里判断，因为它使用 DEFERRED_LOG_PREFIXES 缓冲日志
+        const shouldDeferOutput = tracker.streamFocusNode === "09_humanize" &&
           DEFERRED_NODES_DURING_STREAM.has(nodeName);
 
         // 如果正在等待交互，不显示后台节点的启动信息
@@ -649,7 +689,8 @@ export async function main() {
 
         const nodeInfo = NODE_INFO[nodeName];
         const displayName = nodeInfo?.name || nodeName;
-        const shouldDeferOutput = tracker.streamFocusNode === STREAM_FOCUS_NODE &&
+        // 判断是否需要延迟输出（用于 Prompts/Images 并行场景）
+        const shouldDeferOutput = tracker.streamFocusNode === "09_humanize" &&
           DEFERRED_NODES_DURING_STREAM.has(nodeName);
 
         if (nodeInfo?.isInteractive) {
@@ -741,7 +782,8 @@ export async function main() {
           // 非并行节点：不自动显示输出预览（用户可通过 'v' 查看）
         }
 
-        if (nodeName === STREAM_FOCUS_NODE) {
+        // 当聚焦节点完成时，清除聚焦状态并输出缓冲的日志
+        if (tracker.streamFocusNode && nodeName === tracker.streamFocusNode) {
           tracker.streamFocusNode = null;
           if (tracker.deferredCompletions.length > 0) {
             const completions = tracker.deferredCompletions.splice(0);

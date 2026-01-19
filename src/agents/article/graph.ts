@@ -3,12 +3,8 @@ import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import { join } from "path";
 import { ArticleAnnotation } from "./state";
 
-// 导入 MVP 节点
-import { simpleLlmNode } from "./nodes/01_simple_llm.node";
-import { simpleLlmNode2 } from "./nodes/02_simple_llm.node";
-import { simpleLlmNode3 } from "./nodes/03_simple_llm.node";
-import { saveOutputNode } from "./nodes/02_save_output.node";
-import { endNode } from "./nodes/03_end.node";
+// 导入辅助节点
+import { endNode } from "./nodes/deprecated/03_end.node";
 
 // 导入交互节点 (v2)
 import { selectWechatNode } from "./nodes/00_select_wechat.node";
@@ -42,41 +38,7 @@ const checkpointer = SqliteSaver.fromConnString(
   join(process.cwd(), "src", "checkpoints", "article", "checkpoints.db")
 );
 
-// ========== 流程 1: 多节点测试图（MVP） ==========
-
-/**
- * 多节点测试图（3 个 LLM 节点并行）
- *
- * 并行流程: START → [llm_1, llm_2, llm_3] → save → end → END
- *
- * 节点职责:
- * - llm_1: 调用 LLM 生成文本 (配置1)
- * - llm_2: 调用 LLM 生成文本 (配置2)
- * - llm_3: 调用 LLM 生成文本 (配置3)
- * - save: 保存所有输出到文件系统
- * - end: 清理和确认
- *
- * 设计原则:
- * - 每个节点只做一件事
- * - 并行执行提高效率
- * - 无条件分支,无特殊情况
- */
-const multiNodeWorkflow = new StateGraph(ArticleAnnotation)
-  .addNode("llm_1", simpleLlmNode)
-  .addNode("llm_2", simpleLlmNode2)
-  .addNode("llm_3", simpleLlmNode3)
-  .addNode("save", saveOutputNode)
-  .addNode("end", endNode)
-  .addEdge(START, "llm_1")
-  .addEdge(START, "llm_2")
-  .addEdge(START, "llm_3")
-  .addEdge("llm_1", "save")
-  .addEdge("llm_2", "save")
-  .addEdge("llm_3", "save")
-  .addEdge("save", "end")
-  .addEdge("end", END);
-
-// ========== 流程 2: 交互节点测试图 (v2) ==========
+// ========== 流程 1: 交互节点测试图 (v2) ==========
 
 /**
  * 交互节点测试图
@@ -101,18 +63,6 @@ const interactiveTestWorkflow = new StateGraph(ArticleAnnotation)
   .addEdge("gate_b_confirm_images", "gate_c_select_title")
   .addEdge("gate_c_select_title", "end")
   .addEdge("end", END);
-
-// ========== 导出编译后的图实例 ==========
-
-/**
- * 主图 (MVP 多节点测试)
- */
-export const graph = multiNodeWorkflow.compile({ checkpointer });
-
-/**
- * 备用单节点图
- */
-export const singleNodeGraph = multiNodeWorkflow.compile({ checkpointer });
 
 /**
  * 交互测试图 (v2)
@@ -270,3 +220,13 @@ const fullArticleWorkflow = new StateGraph(ArticleAnnotation)
  * ```
  */
 export const fullArticleGraph = fullArticleWorkflow.compile({ checkpointer });
+
+/**
+ * 主图 (默认导出完整 Article Agent Workflow v2)
+ */
+export const graph = fullArticleWorkflow.compile({ checkpointer });
+
+/**
+ * 备用单节点图 (使用完整工作流)
+ */
+export const singleNodeGraph = fullArticleWorkflow.compile({ checkpointer });
