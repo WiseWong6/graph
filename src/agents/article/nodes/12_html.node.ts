@@ -111,41 +111,47 @@ export async function htmlNode(state: ArticleState): Promise<Partial<ArticleStat
     throw new Error("Humanized article not found in state");
   }
 
-  // ========== 防御性检查 ==========
-  if (!state.uploadedImageUrls) {
-    console.error("[12_html] ========== ERROR ==========");
-    console.error("[12_html] uploadedImageUrls is MISSING in state!");
-    console.error("[12_html] This means 11_upload node was not executed or failed.");
-    console.error("[12_html] State keys:", Object.keys(state));
-    throw new Error("uploadedImageUrls not found - 11_upload node may have been skipped");
-  }
-
-  // 检查用户是否配置了图片
-  const expectedImageCount = state.decisions?.images?.count || 0;
-
-  if (expectedImageCount > 0 && state.uploadedImageUrls.length === 0) {
-    console.error("[12_html] ========== ERROR ==========");
-    console.error(`[12_html] User configured ${expectedImageCount} images, but uploadedImageUrls is EMPTY!`);
-    console.error("[12_html] This means 11_upload node failed or was skipped.");
-    console.error("[12_html] State keys:", Object.keys(state));
-    throw new Error(`Expected ${expectedImageCount} uploaded URLs, but got 0 - 11_upload node may have failed`);
-  }
-
-  if (expectedImageCount === 0 && state.uploadedImageUrls.length === 0) {
-    console.log("[12_html] User configured 0 images, skipping image processing");
-    // 移除 Markdown 中的所有图片占位符
-    state.humanized = state.humanized.replace(/!\[.*?\]\(.*?\)/g, "");
-  }
-
-  const uploadedUrls = state.uploadedImageUrls;
-  console.log(`[12_html] Processing ${uploadedUrls.length} uploaded images (user configured ${expectedImageCount})`);
-
   const outputPath = state.outputPath || getDefaultOutputPath();
   const finalDir = join(outputPath, "final");
 
   if (!existsSync(finalDir)) {
     mkdirSync(finalDir, { recursive: true });
   }
+
+  // 检查用户是否配置了图片
+  const expectedImageCount = state.decisions?.images?.count || 0;
+
+  // ========== 防御性检查 ==========
+  // 只有当用户配置了图片但没拿到上传结果时才报错
+  // 如果用户配置了 0 张图片，uploadedImageUrls 可能不存在（因为跳过了整个图片分支）
+  if (expectedImageCount > 0 && !state.uploadedImageUrls) {
+    console.error("[12_html] ========== ERROR ==========");
+    console.error(`[12_html] User configured ${expectedImageCount} images, but uploadedImageUrls is MISSING!`);
+    console.error("[12_html] This means 11_upload node was not executed or failed.");
+    console.error("[12_html] State keys:", Object.keys(state));
+    throw new Error(`Expected ${expectedImageCount} uploaded URLs, but got nothing - 11_upload node may have been skipped`);
+  }
+
+  // 处理 0 张图片的情况
+  if (expectedImageCount === 0) {
+    console.log("[12_html] User configured 0 images, skipping image processing");
+    // 移除 Markdown 中的所有图片占位符
+    state.humanized = state.humanized.replace(/!\[.*?\]\(.*?\)/g, "");
+    // 直接生成 HTML（不需要图片 URL）
+    return processMarkdown(state.humanized, [], outputPath, finalDir);
+  }
+
+  // 此时 expectedImageCount > 0，必须要有 uploadedImageUrls
+  if (state.uploadedImageUrls.length === 0) {
+    console.error("[12_html] ========== ERROR ==========");
+    console.error(`[12_html] User configured ${expectedImageCount} images, but uploadedImageUrls is EMPTY!`);
+    console.error("[12_html] This means 11_upload node failed.");
+    console.error("[12_html] State keys:", Object.keys(state));
+    throw new Error(`Expected ${expectedImageCount} uploaded URLs, but got 0 - 11_upload node may have failed`);
+  }
+
+  const uploadedUrls = state.uploadedImageUrls;
+  console.log(`[12_html] Processing ${uploadedUrls.length} uploaded images (user configured ${expectedImageCount})`);
 
   console.log(`[12_html] Processing article with ${uploadedUrls.length} images...`);
 
@@ -246,4 +252,73 @@ function getDefaultOutputPath(): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const runId = `article-${timestamp}`;
   return join(process.cwd(), "output", runId);
+}
+
+/**
+ * 处理 Markdown 并生成 HTML（用于 0 张图片的情况）
+ *
+ * @param markdown - Markdown 文本
+ * @param uploadedUrls - 上传的图片 URL 列表
+ * @param outputPath - 输出路径
+ * @param finalDir - 最终输出目录
+ */
+function processMarkdown(
+  markdown: string,
+  uploadedUrls: string[],
+  outputPath?: string,
+  finalDir?: string
+): { htmlPath: string } {
+  const actualOutputPath = outputPath || getDefaultOutputPath();
+  const actualFinalDir = finalDir || join(actualOutputPath, "final");
+
+  if (!existsSync(actualFinalDir)) {
+    mkdirSync(actualFinalDir, { recursive: true });
+  }
+
+  // 替换图片占位符（如果有）
+  let processedMarkdown = markdown;
+  if (uploadedUrls.length > 0) {
+    processedMarkdown = replaceImagePlaceholders(markdown, uploadedUrls);
+  }
+
+  // 使用 markdown-it 解析 Markdown
+  const md = new MarkdownIt({
+    html: true,
+    linkify: true,
+    typographer: true
+  });
+
+  const htmlContent = md.render(processedMarkdown);
+
+  // 包装为微信编辑器格式
+  const fullHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>文章</title>
+  ${WECHAT_STYLES}
+</head>
+<body>
+  <section class="article-content">
+    ${htmlContent}
+  </section>
+</body>
+</html>`;
+
+  // 保存 HTML
+  const htmlPath = join(actualFinalDir, "article.html");
+  writeFileSync(htmlPath, fullHtml, "utf-8");
+  console.log("[12_html] Saved HTML:", htmlPath);
+
+  // 保存 Markdown
+  const mdPath = join(actualFinalDir, "article.md");
+  writeFileSync(mdPath, processedMarkdown, "utf-8");
+  console.log("[12_html] Saved Markdown:", mdPath);
+
+  // 统计图片数量
+  const finalImageCount = (processedMarkdown.match(/!\[.*?\]\(.*?\)/g) || []).length;
+  console.log(`[12_html] Converted ${finalImageCount} images to CDN URLs`);
+
+  return { htmlPath };
 }

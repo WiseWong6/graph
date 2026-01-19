@@ -7,6 +7,32 @@
 import OpenAI from "openai";
 import type { LLMNodeConfig } from "../config/llm.js";
 
+/**
+ * Simple async mutex to prevent concurrent stdout writes
+ * Ensures streaming output from parallel nodes doesn't interleave
+ */
+class AsyncMutex {
+  private locked = false;
+  private queue: Array<(value: void) => void> = [];
+
+  async acquire(): Promise<() => void> {
+    while (this.locked) {
+      await new Promise<void>(resolve => this.queue.push(resolve));
+    }
+    this.locked = true;
+    return () => this.release();
+  }
+
+  private release(): void {
+    this.locked = false;
+    const resolve = this.queue.shift();
+    if (resolve) resolve();
+  }
+}
+
+// Module-level mutex for all stdout operations
+const stdoutMutex = new AsyncMutex();
+
 // DeepSeek-specific response extensions
 // The DeepSeek Reasoner model returns reasoning_content and reasoning_tokens
 interface DeepSeekCompletionMessage extends OpenAI.ChatCompletionMessage {
@@ -162,10 +188,10 @@ export class LLMClient {
     }
     messages.push({ role: "user", content: options.prompt });
 
-    // DeepSeek 使用流式输出（支持所有 DeepSeek 模型）
-    const isDeepSeek = this.config.provider === "deepseek";
+    // DeepSeek Reasoner 使用流式输出（仅 reasoner 模型）
+    const isDeepSeekReasoner = this.config.provider === "deepseek" && this.config.model.includes("reasoner");
 
-    if (isDeepSeek) {
+    if (isDeepSeekReasoner) {
       return await this.callDeepSeekStreaming(client, messages, options);
     }
 
@@ -197,7 +223,9 @@ export class LLMClient {
 
   /**
    * DeepSeek Reasoner 流式输出
+   * 仅用于 deepseek-reasoner 模型（支持 reasoning_content 字段）
    * 逐字显示思考过程和最终内容
+   * 使用互斥锁防止并行执行时输出交错
    */
   private async callDeepSeekStreaming(
     client: OpenAI,
@@ -225,8 +253,13 @@ export class LLMClient {
       if (delta?.reasoning_content) {
         const text = delta.reasoning_content;
         reasoningContent += text;
-        // 逐字输出到控制台（不换行，逐字追加）
-        process.stdout.write(text);
+        // 使用互斥锁保护 stdout，防止并行输出交错
+        const release = await stdoutMutex.acquire();
+        try {
+          process.stdout.write(text);
+        } finally {
+          release();
+        }
         inReasoning = true;
       }
 
@@ -239,8 +272,13 @@ export class LLMClient {
         }
         const text = delta.content;
         responseContent += text;
-        // 逐字输出到控制台
-        process.stdout.write(text);
+        // 使用互斥锁保护 stdout，防止并行输出交错
+        const release = await stdoutMutex.acquire();
+        try {
+          process.stdout.write(text);
+        } finally {
+          release();
+        }
       }
     }
 

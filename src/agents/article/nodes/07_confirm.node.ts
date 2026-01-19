@@ -98,6 +98,55 @@ const STYLE_DESCRIPTIONS: Record<ImageStyle, string> = {
 };
 
 /**
+ * 智能推荐图片数量
+ *
+ * 基于以下因素:
+ * 1. 文章长度
+ * 2. 核心观点数量（从 Brief 中提取）
+ * 3. 标题复杂度
+ */
+function recommendImageCount(state: ArticleState): number {
+  const content = state.humanized || state.rewritten || state.draft || "";
+  const brief = state.researchResult || "";
+
+  // 因素1: 文章长度
+  const wordCount = content.length;
+  let baseCount = 4; // 默认4张
+
+  if (wordCount < 1000) {
+    baseCount = 2;
+  } else if (wordCount < 2000) {
+    baseCount = 3;
+  } else if (wordCount < 3000) {
+    baseCount = 4;
+  } else if (wordCount < 5000) {
+    baseCount = 5;
+  } else {
+    baseCount = 6;
+  }
+
+  // 因素2: 核心观点数量（从 Brief 中提取）
+  const keyInsightsMatch = brief.match(/## 核心洞察\s*\n([\s\S]*?)(?=##|$)/i);
+  if (keyInsightsMatch) {
+    const insightsText = keyInsightsMatch[1];
+    const insightsCount = (insightsText.match(/^\d+\./gm) || []).length;
+    if (insightsCount > 0) {
+      // 每个核心观点配1张图，但限制在2-8张之间
+      baseCount = Math.max(2, Math.min(8, insightsCount));
+    }
+  }
+
+  // 因素3: 标题复杂度
+  const selectedTitle = state.decisions?.selectedTitle || "";
+  if (selectedTitle.includes("||")) {
+    // 有副标题，内容可能更丰富，增加1张
+    baseCount = Math.min(8, baseCount + 1);
+  }
+
+  return baseCount;
+}
+
+/**
  * 智能推荐风格
  *
  * 基于文章内容关键词分析
@@ -218,12 +267,15 @@ export async function confirmImagesNode(
 
   console.log("\n=== Gate B: 确认图片配置 ===\n");
 
-  // ========== 步骤1: 分析内容，推荐风格 ==========
+  // ========== 步骤1: 分析内容，智能推荐 ==========
   const content = state.humanized || state.rewritten || state.draft || "";
   const recommendedStyle = recommendStyle(content);
+  const recommendedCount = recommendImageCount(state);
 
-  console.log("=== 图片风格推荐 ===");
-  console.log(`基于文章内容分析，推荐使用: [${STYLE_NAMES[recommendedStyle]}]`);
+  console.log("=== 图片配置推荐 ===");
+  console.log(`基于文章分析 (${content.length} 字)`);
+  console.log(`推荐风格: [${STYLE_NAMES[recommendedStyle]}]`);
+  console.log(`推荐数量: [${recommendedCount} 张]`);
   console.log(`\n风格描述: ${STYLE_DESCRIPTIONS[recommendedStyle]}`);
   console.log("");
 
@@ -253,8 +305,8 @@ export async function confirmImagesNode(
     {
       type: "input",
       name: "countInput",
-      message: "请输入生成数量（支持简写如 \"4张\"）:",
-      default: "4张",
+      message: "请输入生成数量（支持简写如 \"4张\"，或直接回车使用推荐值）:",
+      default: `${recommendedCount}张`,
       validate: (input: string) => {
         const match = input.match(/(\d+)/);
         if (!match) {

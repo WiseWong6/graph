@@ -183,7 +183,7 @@ models:
         temperature: 0.3  # 降低随机性，确保重生成时结果一致
       timeout: 60  # seconds
 
-    # 图片提示词生成节点（使用 deepseek-chat 避免思考过程泄露）
+    # 图片提示词生成节点（使用 deepseek-chat，非流式输出）
     image_prompt:
       provider: deepseek
       model: deepseek-chat

@@ -25,6 +25,7 @@ import { humanizeNode } from "./nodes/08_humanize.node";
 import { promptsNode } from "./nodes/09_prompts.node";
 import { imagesNode } from "./nodes/10_images.node";
 import { uploadImagesNode } from "./nodes/11_upload.node";
+import { waitForUploadNode } from "./nodes/wait_for_upload.node";
 import { htmlNode } from "./nodes/12_html.node";
 import { draftboxNode } from "./nodes/13_draftbox.node";
 
@@ -185,6 +186,7 @@ const fullArticleWorkflow = new StateGraph(ArticleAnnotation)
   // 代码节点
   .addNode("10_images", imagesNode)
   .addNode("11_upload", uploadImagesNode)
+  .addNode("wait_for_upload", waitForUploadNode)  // 并行同步点
   .addNode("12_html", htmlNode)
   .addNode("13_draftbox", draftboxNode)
   .addNode("end", endNode)
@@ -223,17 +225,21 @@ const fullArticleWorkflow = new StateGraph(ArticleAnnotation)
   // 并行起点：从 06_rewrite 进入 confirm 节点
   .addEdge("06_rewrite", "07_confirm")       // rewrite → confirm
 
-  // confirm 完成后，并行触发 prompts 和 humanize（传递 imageCount）
-  .addEdge("07_confirm", "09_prompts")       // confirm → prompts
-  .addEdge("07_confirm", "08_humanize")      // confirm → humanize（并行执行）
+  // confirm 完成后，同时触发图片分支和文本分支（无条件并行）
+  // 图片分支：09_prompts → 10_images → 11_upload → wait_for_upload
+  // 文本分支：08_humanize
+  // 两个分支在 12_html 汇聚（LangGraph 自动等待所有入边完成）
+  .addEdge("07_confirm", "09_prompts")       // confirm → prompts（图片分支）
+  .addEdge("07_confirm", "08_humanize")      // confirm → humanize（文本分支）
 
-  // 图片流程：prompts → images → upload
+  // 图片流程：prompts → images → upload → wait_for_upload（并行同步点）
   .addEdge("09_prompts", "10_images")
   .addEdge("10_images", "11_upload")
+  .addEdge("11_upload", "wait_for_upload")
 
-  // 汇聚点：html 等待 humanize 和 upload 都完成（严格顺序）
-  // 注意：必须将 upload 的边放在 humanize 之前，确保 LangGraph 正确处理
-  .addEdge("11_upload", "12_html")
+  // 汇聚点：html 等待 humanize 和 wait_for_upload 都完成
+  // wait_for_upload 只在 11_upload 完成后才触发，确保 12_html 在正确时机执行
+  .addEdge("wait_for_upload", "12_html")
   .addEdge("08_humanize", "12_html")
 
   // 后续节点

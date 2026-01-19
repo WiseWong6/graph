@@ -12,9 +12,9 @@
  * - 返回 CDN URL
  */
 
+import FormData from "form-data";
 import { readFileSync, existsSync } from "fs";
 import { ArticleState } from "../state";
-import { httpPostFormData } from "../../../adapters/mcp.js";
 import { parallelMap } from "../../../utils/concurrency.js";
 
 /**
@@ -42,6 +42,7 @@ interface UploadImageResponse {
  * @returns 更新的状态
  */
 export async function uploadImagesNode(state: ArticleState): Promise<Partial<ArticleState>> {
+  console.log("[11.5_upload] ========== NODE STARTED ==========");
   console.log("[11.5_upload] ========== START ==========");
   console.log("[11.5_upload] imagePaths:", state.imagePaths);
   console.log("[11.5_upload] wechat config:", state.decisions?.wechat ? "SET" : "MISSING");
@@ -137,29 +138,40 @@ async function uploadImage(
   // 首先获取 access_token
   const token = await getAccessToken(config);
 
-  // 构建 FormData - Node.js 需要显式指定 filename
+  // 构建 FormData - 使用 form-data npm 包的原生 API
   const formData = new FormData();
 
-  // 从 Buffer 创建 File 对象（Node.js 18+ 支持）
-  // 或使用 Blob 并指定文件名
-  const file = new File([imageBuffer], "image.png", { type: "image/png" });
-  formData.append("media", file);
+  // 使用 form-data 的原生 API：append(name, buffer, options)
+  formData.append("media", imageBuffer, {
+    filename: "image.png",
+    contentType: "image/png"
+  });
 
-  // 上传图文消息图片
-  const response = await httpPostFormData<UploadImageResponse>(
+  // 上传图文消息图片 - 使用 fetch + form-data 的 buffer
+  const response = await fetch(
     `${config.apiUrl}/cgi-bin/media/uploadimg?access_token=${token}`,
-    formData
+    {
+      method: "POST",
+      headers: formData.getHeaders(),
+      body: formData.getBuffer()
+    }
   );
 
-  if (response.errcode && response.errcode !== 0) {
-    throw new Error(`Upload failed: ${response.errmsg} (errcode: ${response.errcode})`);
+  if (!response.ok) {
+    throw new Error(`Upload failed: ${response.statusText}`);
   }
 
-  if (!response.url) {
+  const data = await response.json() as UploadImageResponse;
+
+  if (data.errcode && data.errcode !== 0) {
+    throw new Error(`Upload failed: ${data.errmsg} (errcode: ${data.errcode})`);
+  }
+
+  if (!data.url) {
     throw new Error("Upload failed: no URL returned");
   }
 
-  return response.url;
+  return data.url;
 }
 
 /**

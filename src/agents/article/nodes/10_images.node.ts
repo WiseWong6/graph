@@ -125,18 +125,30 @@ export async function imagesNode(state: ArticleState): Promise<Partial<ArticleSt
   const imagePaths: string[] = [];
   const errors: string[] = [];
 
+  console.log("[10_images] Processing results:", results.length);
+
   for (const result of results) {
-    if (!result) continue;
+    if (!result) {
+      console.log("[10_images] Skipping undefined result");
+      continue;
+    }
 
     if (result.path) {
       imagePaths[result.index] = result.path;
+      console.log(`[10_images] Image ${result.index}: ${result.path}`);
     } else if (result.error) {
       errors.push(`Image ${result.index + 1}: ${result.error}`);
+      console.log(`[10_images] Image ${result.index} failed: ${result.error}`);
     }
   }
 
+  // 过滤掉空洞（undefined 元素）
+  const validPaths = imagePaths.filter(p => p !== undefined && p !== null && p !== "") as string[];
+  console.log("[10_images] Valid paths:", validPaths.length);
+  console.log("[10_images] Valid paths array:", validPaths);
+
   log.completeStep("generate_images", {
-    success: imagePaths.filter(Boolean).length,
+    success: validPaths.length,
     failed: errors.length
   });
 
@@ -146,8 +158,22 @@ export async function imagesNode(state: ArticleState): Promise<Partial<ArticleSt
 
   log.success(`Complete in ${timer.log()}`);
 
+  // Debug: 确认返回值
+  console.log("[10_images] ========== RETURNING ==========");
+  console.log("[10_images] Returning imagePaths:", validPaths);
+  console.log("[10_images] imagePaths.length:", validPaths.length);
+  console.log("[10_images] imagePaths is array:", Array.isArray(validPaths));
+  console.log("[10_images] imagePaths[0]:", validPaths[0]);
+  console.log("[10_images] =================================");
+
+  // 确保返回值是一个非空数组
+  if (!Array.isArray(validPaths) || validPaths.length === 0) {
+    console.error("[10_images] ERROR: validPaths is not a valid array!");
+    throw new Error("10_images node failed: no valid image paths");
+  }
+
   return {
-    imagePaths: imagePaths.filter(Boolean)
+    imagePaths: validPaths
   };
 }
 

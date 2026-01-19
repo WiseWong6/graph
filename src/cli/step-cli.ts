@@ -19,6 +19,16 @@ import { fullArticleGraph } from "../agents/article/graph.js";
 import type { ArticleState } from "../agents/article/state.js";
 import { ResumeManager } from "./resume-manager.js";
 
+/**
+ * 节点耗时汇总
+ */
+interface TimingSummary {
+  nodeName: string;
+  displayName: string;
+  duration: number;  // 毫秒
+  startTime: number;
+}
+
 // 节点信息映射
 const NODE_INFO: Record<string, { name: string; description: string; hasOutput: boolean; isInteractive: boolean }> = {
   "gate_a_select_wechat": { name: "选择公众号", description: "选择要发布的公众号账号", hasOutput: false, isInteractive: true },
@@ -37,139 +47,6 @@ const NODE_INFO: Record<string, { name: string; description: string; hasOutput: 
   "13_draftbox": { name: "发布到草稿箱", description: "发布到微信公众号草稿箱", hasOutput: true, isInteractive: false },
   "end": { name: "完成", description: "清理和确认", hasOutput: false, isInteractive: false },
 };
-
-/**
- * 格式化节点输出用于预览
- */
-function formatNodeOutput(nodeName: string, state: ArticleState): string {
-  const lines: string[] = [];
-
-  switch (nodeName) {
-    case "01_research":
-      if (state.researchResult) {
-        lines.push(chalk.cyan("📋 调研结果 (Brief):"));
-        lines.push("─".repeat(50));
-        // 只显示前 500 字
-        const preview = state.researchResult.slice(0, 500);
-        lines.push(preview);
-        if (state.researchResult.length > 500) {
-          lines.push(chalk.gray(`... (省略 ${state.researchResult.length - 500} 字)`));
-        }
-      }
-      break;
-
-    case "02_rag":
-      if (state.ragContent) {
-        lines.push(chalk.cyan("📚 RAG 检索结果:"));
-        lines.push("─".repeat(50));
-        const preview = state.ragContent.slice(0, 500);
-        lines.push(preview);
-        if (state.ragContent.length > 500) {
-          lines.push(chalk.gray(`... (省略 ${state.ragContent.length - 500} 字)`));
-        }
-      }
-      break;
-
-    case "03_titles":
-      if (state.titles && state.titles.length > 0) {
-        lines.push(chalk.cyan("📝 候选标题:"));
-        lines.push("─".repeat(50));
-        state.titles.forEach((title, i) => {
-          lines.push(chalk.green(`  ${i + 1}. ${title}`));
-        });
-      }
-      break;
-
-    case "05_draft":
-      if (state.draft) {
-        lines.push(chalk.cyan("✍️ 初稿:"));
-        lines.push("─".repeat(50));
-        const preview = state.draft.slice(0, 800);
-        lines.push(preview);
-        if (state.draft.length > 800) {
-          lines.push(chalk.gray(`... (省略 ${state.draft.length - 800} 字)`));
-        }
-      }
-      break;
-
-    case "06_rewrite":
-      if (state.rewritten) {
-        lines.push(chalk.cyan("🔄 智性叙事重写:"));
-        lines.push("─".repeat(50));
-        const preview = state.rewritten.slice(0, 500);
-        lines.push(preview);
-        if (state.rewritten.length > 500) {
-          lines.push(chalk.gray(`... (省略 ${state.rewritten.length - 500} 字)`));
-        }
-      }
-      break;
-
-    case "08_humanize":
-      if (state.humanized) {
-        lines.push(chalk.cyan("👤 人化后:"));
-        lines.push("─".repeat(50));
-        const preview = state.humanized.slice(0, 500);
-        lines.push(preview);
-        if (state.humanized.length > 500) {
-          lines.push(chalk.gray(`... (省略 ${state.humanized.length - 500} 字)`));
-        }
-      }
-      break;
-
-    case "09_prompts":
-      if (state.imagePrompts && state.imagePrompts.length > 0) {
-        lines.push(chalk.cyan("🎨 图片提示词:"));
-        lines.push("─".repeat(50));
-        state.imagePrompts.forEach((prompt, i) => {
-          lines.push(chalk.green(`  图片 ${i + 1}:`));
-          lines.push(chalk.gray(`    ${prompt.slice(0, 100)}...`));
-        });
-      }
-      break;
-
-    case "10_images":
-      if (state.imagePaths && state.imagePaths.length > 0) {
-        lines.push(chalk.cyan("🖼️ 生成的图片:"));
-        lines.push("─".repeat(50));
-        state.imagePaths.forEach((path, i) => {
-          lines.push(chalk.green(`  ${i + 1}. ${path}`));
-        });
-      }
-      break;
-
-    case "11_upload":
-      if (state.uploadedImageUrls && state.uploadedImageUrls.length > 0) {
-        lines.push(chalk.cyan("⬆️ 上传后的 URL:"));
-        lines.push("─".repeat(50));
-        state.uploadedImageUrls.forEach((url, i) => {
-          lines.push(chalk.green(`  ${i + 1}. ${url}`));
-        });
-      }
-      break;
-
-    case "12_html":
-      if (state.htmlPath) {
-        lines.push(chalk.cyan("📄 HTML 文件:"));
-        lines.push("─".repeat(50));
-        lines.push(chalk.green(`  ${state.htmlPath}`));
-      }
-      break;
-
-    case "13_draftbox":
-      lines.push(chalk.cyan("✅ 已发布到草稿箱"));
-      if (state.outputPath) {
-        lines.push(chalk.green(`  输出目录: ${state.outputPath}`));
-      }
-      break;
-
-    default:
-      if (nodeName.startsWith("gate_")) {
-        lines.push(chalk.gray(`  (交互节点，无预览)`));
-      }
-  }
-
-  return lines.join("\n");
-}
 
 
 /**
@@ -256,6 +133,39 @@ async function promptForTopic(): Promise<string> {
       }
     });
   });
+}
+
+/**
+ * 显示耗时统计汇总
+ */
+function showTimingSummary(summaries: TimingSummary[], workflowStartTime: number): void {
+  const totalDuration = Date.now() - workflowStartTime;
+
+  console.log("\n" + "═".repeat(60));
+  console.log(chalk.cyan.bold("⏱️  耗时统计"));
+  console.log("═".repeat(60));
+
+  // 端到端总耗时
+  console.log(chalk.bold(`\n总耗时: ${(totalDuration / 1000).toFixed(1)}s\n`));
+
+  if (summaries.length === 0) {
+    console.log(chalk.gray("无节点耗时数据"));
+    console.log("═".repeat(60) + "\n");
+    return;
+  }
+
+  // 节点耗时排名（从慢到快）
+  const sorted = [...summaries].sort((a, b) => b.duration - a.duration);
+
+  console.log("节点耗时排名:");
+  sorted.forEach((t, i) => {
+    const duration = (t.duration / 1000).toFixed(1);
+    const barLength = Math.min(Math.floor(t.duration / 1000), 20);
+    const bar = chalk.cyan("█".repeat(barLength));
+    console.log(`  ${i + 1}. ${chalk.white(t.displayName.padEnd(12))} ${chalk.yellow(duration.padStart(6))}s ${bar}`);
+  });
+
+  console.log("\n" + "═".repeat(60));
 }
 
 /**
@@ -350,13 +260,29 @@ export async function main() {
       activeNodes: Map<string, number>;  // nodeName → startTime
       completedNodes: Set<string>;
       lastState: ArticleState | null;
+      isWaitingForInteraction: boolean;  // 是否正在等待交互节点完成
+      parallelCompletionSummaries: Map<string, { displayName: string; duration: string }>;  // 并行节点摘要收集
     }
 
     const tracker: ParallelTracker = {
       activeNodes: new Map(),
       completedNodes: new Set(),
-      lastState: null
+      lastState: null,
+      isWaitingForInteraction: false,
+      parallelCompletionSummaries: new Map()
     };
+
+    // 耗时汇总收集
+    const timingSummaries: TimingSummary[] = [];
+    let workflowStartTime: number = Date.now();
+
+    // 用户节点列表（用于过滤内部事件）
+    const USER_NODES = new Set([
+      "gate_a_select_wechat", "01_research", "02_rag", "03_titles",
+      "gate_c_select_title", "05_draft", "06_rewrite", "07_confirm",
+      "08_humanize", "09_prompts", "10_images", "11_upload",
+      "12_html", "13_draftbox", "end"
+    ]);
 
     for await (const event of eventStream) {
       // 根据模式解析事件
@@ -383,38 +309,72 @@ export async function main() {
         }
       }
 
-      // 跳过内部事件（如 __start__, __end__ 等）
+      // 跳过内部事件（如 __start__, __end__, ChannelWrite 等）
       if (!nodeName || nodeName.startsWith("__")) continue;
+      if (!USER_NODES.has(nodeName)) continue;
 
       // 节点启动事件 - 检测并行执行
       if (eventType === "on_chain_start") {
+        // 如果是交互节点启动，标记正在等待交互
+        if (NODE_INFO[nodeName]?.isInteractive) {
+          tracker.isWaitingForInteraction = true;
+        }
+
+        // 如果正在等待交互，不显示后台节点的启动信息
+        if (tracker.isWaitingForInteraction && !NODE_INFO[nodeName]?.isInteractive) {
+          tracker.activeNodes.set(nodeName, Date.now());
+          continue;
+        }
         tracker.activeNodes.set(nodeName, Date.now());
 
         const activeCount = tracker.activeNodes.size;
         const nodeInfo = NODE_INFO[nodeName];
         const displayName = nodeInfo?.name || nodeName;
 
+        // 检查前一个节点是否是交互节点
+        const prevNode = Array.from(tracker.completedNodes).pop();
+        const wasInteractive = prevNode && NODE_INFO[prevNode]?.isInteractive;
+
         if (activeCount > 1) {
-          // 检测到并行执行：显示当前活跃节点
+          // 检测到并行执行
           const nodes = Array.from(tracker.activeNodes.keys())
             .map(n => NODE_INFO[n]?.name || n)
             .join(" + ");
-          console.log(chalk.yellow(`⚡ 并行执行 [${activeCount}]: ${nodes}`));
-        } else {
-          // 单节点执行
+
+          // 如果前一个节点是交互节点，显示更温和的提示
+          if (wasInteractive) {
+            console.log(chalk.dim(`⏳ 后台执行: ${nodes}`));
+          } else {
+            console.log(chalk.yellow(`⚡ 并行执行 [${activeCount}]: ${nodes}`));
+          }
+        } else if (!wasInteractive) {
+          // 单节点执行，且前一个节点不是交互节点
           console.log(chalk.gray(`▶️ ${displayName}`));
         }
+        // 如果前一个是交互节点，不显示启动信息（避免干扰用户体验）
       }
 
       // 节点完成事件
       if (eventType === "on_chain_end") {
         const startTime = tracker.activeNodes.get(nodeName) || Date.now();
-        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+        const endTime = Date.now();
+        const durationMs = endTime - startTime;
+        const duration = (durationMs / 1000).toFixed(1);
         tracker.activeNodes.delete(nodeName);
         tracker.completedNodes.add(nodeName);
 
         const nodeInfo = NODE_INFO[nodeName];
         const displayName = nodeInfo?.name || nodeName;
+
+        // 收集耗时数据
+        if (nodeInfo) {
+          timingSummaries.push({
+            nodeName,
+            displayName,
+            duration: durationMs,
+            startTime
+          });
+        }
 
         // 合并状态更新
         if (stateUpdate && typeof stateUpdate === "object") {
@@ -425,26 +385,50 @@ export async function main() {
           }
         }
 
-        // 显示完成信息
-        if (nodeInfo?.hasOutput) {
-          console.log(chalk.green(`✅ ${displayName} (${duration}s)`));
-        } else {
+        // 如果是交互节点完成，取消等待标记并显示完成信息
+        if (nodeInfo?.isInteractive) {
+          tracker.isWaitingForInteraction = false;
           console.log(chalk.dim(`✓ ${displayName} (${duration}s)`));
+        } else if (!tracker.isWaitingForInteraction) {
+          // 非交互节点，且不在等待交互中，才显示完成信息
+          if (nodeInfo?.hasOutput) {
+            console.log(chalk.green(`✅ ${displayName} (${duration}s)`));
+          } else {
+            console.log(chalk.dim(`✓ ${displayName} (${duration}s)`));
+          }
         }
 
-        // 如果还有活跃节点，显示剩余进度
-        if (tracker.activeNodes.size > 0) {
+        // 如果还有活跃节点，显示剩余进度（但不在等待交互时）
+        if (tracker.activeNodes.size > 0 && !tracker.isWaitingForInteraction) {
           const remaining = Array.from(tracker.activeNodes.keys())
             .map(n => NODE_INFO[n]?.name || n);
           console.log(chalk.dim(`   ⏳ 进行中: ${remaining.join(", ")}`));
         }
 
-        // 显示输出预览（如果有）
-        if (nodeInfo?.hasOutput && tracker.lastState) {
-          const output = formatNodeOutput(nodeName, tracker.lastState);
-          if (output) {
-            console.log("\n" + output + "\n");
+        // 并行节点处理：收集摘要或显示
+        // 如果已有摘要收集，或删除前活跃节点>1，则是并行执行
+        const wasParallelExecution = tracker.parallelCompletionSummaries.size > 0 ||
+          (tracker.activeNodes.size + 1 > 1);
+
+        if (nodeInfo?.hasOutput && tracker.lastState && !tracker.isWaitingForInteraction) {
+          if (wasParallelExecution) {
+            // 并行节点：收集摘要
+            tracker.parallelCompletionSummaries.set(nodeName, {
+              displayName,
+              duration
+            });
+
+            // 当最后一个并行节点完成时，显示简洁摘要
+            if (tracker.activeNodes.size === 0) {
+              const summaries = Array.from(tracker.parallelCompletionSummaries.entries())
+                .map(([_, info]) => `✅ ${info.displayName} (${info.duration}s)`)
+                .join(" | ");
+
+              console.log(chalk.dim(`   ${summaries}`));
+              tracker.parallelCompletionSummaries.clear();
+            }
           }
+          // 非并行节点：不自动显示输出预览（用户可通过 'v' 查看）
         }
       }
 
@@ -482,6 +466,9 @@ export async function main() {
       console.log(chalk.gray(`  输出目录: ${tracker.lastState.outputPath || "无"}`));
       console.log(chalk.gray(`  状态: ${tracker.lastState.status || "完成"}\n`));
     }
+
+    // 显示耗时统计汇总
+    showTimingSummary(timingSummaries, workflowStartTime);
 
   } catch (error) {
     spinner.fail("执行失败");

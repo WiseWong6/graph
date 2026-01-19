@@ -220,14 +220,24 @@ function normalizeTitles(input: any[]): string[] {
     if (typeof title !== "string") continue;
     title = title
       .trim()
+      // 1. 移除 markdown 加粗
+      .replace(/\*\*\*/g, "")
+      .replace(/\*\*/g, "")
+      // 2. 移除序号前缀
       .replace(/^\d+[\.\)]\s*/, "")
       .replace(/^[-•*●▪]\s*/, "")
       .replace(/^第?\d+[、.]\s*/, "")
       .replace(/^标题[\d：:]\s*/, "")
+      // 3. 移除书名号《》
+      .replace(/^《/, "")
+      .replace(/》$/, "")
+      // 4. 移除尾部括号注释
       .replace(/（[^）]*）$/, "")
       .replace(/\([^)]*\)$/, "")
+      // 5. 移除其他引号
       .replace(/^\s*["'「『【]/, "")
       .replace(/["'」』】]\s*$/, "")
+      // 6. 合并空格
       .replace(/\s+/g, " ")
       .trim();
 
