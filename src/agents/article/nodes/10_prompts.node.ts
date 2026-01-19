@@ -91,7 +91,10 @@ export async function promptsNode(state: ArticleState): Promise<Partial<ArticleS
 
   try {
     const { response, config } = await callLLMWithFallback(
-      state.decisions?.selectedModel,
+      {
+        selectedModel: state.decisions?.selectedModel,
+        selectedModels: state.decisions?.selectedModels
+      },
       "image_prompt",
       { prompt, systemMessage: PROMPT_SYSTEM_MESSAGE }
     );

@@ -15,7 +15,7 @@ import { resolve } from "path";
 // 加载环境变量
 config({ path: resolve(process.cwd(), ".env") });
 
-import { createParallelSearchManager } from "../../../adapters/parallel-search.js";
+import { createParallelSearchManager } from "../../../../adapters/parallel-search.js";
 
 interface TestOptions {
   verbose?: boolean;

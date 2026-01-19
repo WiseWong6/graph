@@ -99,9 +99,11 @@
 - 为后续图片生成流程提供配置
 
 ### Humanize 节点 (09)
-- 格式清洗：去空格、标点规范、去引号
-- 风格重写：去 AI 味、段落融合、口语化
-- 保留 Markdown 结构（代码/链接/图片）
+- **预处理 (Code)**: 使用确定性正则清洗（src/utils/text-cleaner.ts）
+  - 去空格、标点规范、去引号、破折号处理
+  - 严格保护 Markdown 结构（代码/链接/图片）
+- **风格重写 (LLM)**: 专注于去 AI 味、段落融合、口语化
+- **设计哲学**: Code 处理死板规则，LLM 注入灵魂
 
 ### Images 流程 (10-12)
 - **Prompts (10)**: 5 种风格（infographic/healing/pixar/sokamono/handdrawn）
@@ -151,7 +153,13 @@
 
 ## 变更日志
 
-### 2026-01-19 (晚)
+### 2026-01-19 (晚) - Humanize 重构
+- **架构升级**: Code First, AI Second
+  - 引入 `src/utils/text-cleaner.ts` 处理确定性格式清洗
+  - 消除 LLM 处理引号/破折号时的幻觉风险
+  - LLM 仅负责去 AI 味和润色，不再处理标点规则
+
+### 2026-01-19 (晚) - Upload 回退
 - **Upload 节点回退机制**: 恢复会话时 wechat 配置缺失自动提示选择
   - 解决 `--resume` 恢复时 state.decisions.wechat 丢失问题
   - 添加 `promptForWechat()` 回退函数

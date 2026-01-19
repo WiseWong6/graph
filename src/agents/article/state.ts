@@ -50,6 +50,7 @@ export interface Decisions {
   regenerateTitles?: boolean;   // 是否重新生成标题
   timings?: Record<string, number>; // 节点执行耗时（毫秒），key 为节点名称
   selectedModel?: string;       // 用户选择的模型 ID
+  selectedModels?: Record<string, string>; // 节点级模型覆盖
 }
 
 /**

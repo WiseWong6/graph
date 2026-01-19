@@ -127,10 +127,17 @@ export async function rewriteNode(state: ArticleState): Promise<Partial<ArticleS
   try {
     // 使用重试机制调用 LLM
     const result = await retry(
-      () => callLLMWithFallback(state.decisions?.selectedModel, "rewrite", {
-        prompt: userPrompt,
-        systemMessage
-      }),
+      () => callLLMWithFallback(
+        {
+          selectedModel: state.decisions?.selectedModel,
+          selectedModels: state.decisions?.selectedModels
+        },
+        "rewrite",
+        {
+          prompt: userPrompt,
+          systemMessage
+        }
+      ),
       { maxAttempts: 3, delay: 1000 }
     )();
 

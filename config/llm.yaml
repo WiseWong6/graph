@@ -1,308 +1,138 @@
-# =============================================================================
-# LLM 模型配置文件
-# =============================================================================
-# 用于配置不同节点使用的 LLM 模型、API 凭证和 Prompt 模板
-#
-# 配置层级：
-#   1. 全局默认配置 (models.default) - 所有节点的基础配置
-#   2. 节点特定配置 (models.nodes.*) - 覆盖默认配置
-#   3. Prompt 模板 (prompts.*) - 每个节点的提示词模板
-#   4. 可用模型列表 (available_models) - CLI 模型选择源
-#   5. Provider 配置 (providers) - Provider 级别配置
-#
-# 继承规则：
-#   - 节点配置会继承 default 的所有字段
-#   - 节点只需指定需要覆盖的字段
-# =============================================================================
-
-# -----------------------------------------------------------------------------
-# 全局凭证配置（可选）
-# -----------------------------------------------------------------------------
-# 如果多个 provider 使用相同的凭证，可以在这里统一配置
-# 也可以直接在每个 provider 下配置
-credentials:
-  # 环境变量前缀，实际值从环境变量读取
-  # 例如：ANTHROPIC_API_KEY、OPENAI_API_KEY
-  env_prefix: ""
-
-# -----------------------------------------------------------------------------
-# 可用模型列表（CLI 模型选择源）
-# -----------------------------------------------------------------------------
-# 定义所有可在 CLI 中选择的模型
-# 用户可以通过 select_model 节点选择其中一个模型用于所有 LLM 节点
-# -----------------------------------------------------------------------------
-available_models:
-  - id: deepseek-reasoner
-    name: "DeepSeek Reasoner (思考模型)"
-    provider: deepseek
-    model: deepseek-reasoner
-    base_url: https://api.deepseek.com
-
-  - id: doubao-ark-ep
-    name: "Doubao (ARK Endpoint)"
-    provider: doubao
-    model: ep-20260119101257-h4zwx
-    base_url: https://ark.cn-beijing.volces.com/api/v3
-
-  - id: deepseek-chat
-    name: "DeepSeek Chat (对话模型)"
-    provider: deepseek
-    model: deepseek-chat
-    base_url: https://api.deepseek.com
-
-# -----------------------------------------------------------------------------
-# Provider 配置
-# -----------------------------------------------------------------------------
-# 定义每个 provider 的默认配置
-# 这些配置会被 available_models 中的具体模型配置覆盖
-# -----------------------------------------------------------------------------
+defaults:
+  model: deepseek-reasoner
 providers:
   deepseek:
+    type: openai_compat
     api_key_env: DEEPSEEK_API_KEY
-    base_url: https://api.deepseek.com
-
-  doubao:
+    base_url: https://api.deepseek.com/v1
+  volcengine:
+    type: openai_compat
     api_key_env: ARK_API_KEY
     base_url: https://ark.cn-beijing.volces.com/api/v3
-    stream: true
-    thinking:
-      type: enabled
-
-# -----------------------------------------------------------------------------
-# 模型配置
-# -----------------------------------------------------------------------------
+    defaults:
+      stream: true
+      thinking:
+        type: enabled
 models:
-  # -------------------------------------------------------------------------
-  # 全局默认配置
-  # -------------------------------------------------------------------------
-  # 所有节点的默认配置，未指定的节点将使用这些设置
-  default:
-    # LLM Provider
-    # 可选值：
-    #   - anthropic: Claude 系列（Claude Opus, Sonnet, Haiku）
-    #   - openai: GPT 系列（GPT-4, GPT-3.5）
-    #   - azure_openai: Azure OpenAI 服务
-    #   - deepseek: DeepSeek 系列
-    #   - 自定义: 兼容 OpenAI API 的服务
-    provider: anthropic
-
-    # 模型名称
-    # 示例：
-    #   - Claude Opus 4.5: claude-opus-4-5-20251101
-    #   - Claude Sonnet 3.5: claude-3-5-sonnet-20241022
-    #   - GPT-4: gpt-4-turbo-preview
-    #   - GPT-3.5: gpt-3.5-turbo
-    model: claude-opus-4-5-20251101
-
-    # API Key 配置
-    # 支持两种方式：
-    #   1. 从环境变量读取：api_key_env: "ANTHROPIC_API_KEY"
-    #   2. 直接配置（不推荐）：api_key: "sk-..."
-    api_key_env: ANTHROPIC_API_KEY
-
-    # API Base URL
-    # 大多数情况下不需要修改，除非使用代理或自定义服务
-    # 示例：
-    #   - Anthropic: https://api.anthropic.com
-    #   - OpenAI: https://api.openai.com/v1
-    #   - 代理: http://localhost:8080
-    base_url: https://api.anthropic.com
-
-    # 请求参数配置
-    params:
-      # 最大生成 Token 数
-      # 不同模型有不同的上限：
-      #   - Claude Opus: 200,000
-      #   - Claude Sonnet: 200,000
-      #   - GPT-4: 128,000
-      max_tokens: 8192
-
-      # 温度参数（控制随机性）
-      # 范围：0.0 - 1.0
-      #   - 0.0: 完全确定性，适合代码生成
-      #   - 0.7: 平衡，适合大部分任务
-      #   - 1.0: 高随机性，适合创意任务
-      temperature: 0.7
-
-      # Top-P 采样（核采样）
-      # 范围：0.0 - 1.0，通常设置为 1.0
-      top_p: 1.0
-
-      # Top-K 采样
-      # 大多数模型不需要此参数
-      # top_k: 40
-
-    # 超时配置（秒）
-    timeout: 120
-
-    # 重试配置
-    retry:
-      # 最大重试次数
-      max_attempts: 3
-      # 重试延迟（秒）
-      delay: 1
-      # 指数退避倍数
-      backoff_multiplier: 2
-
-  # -------------------------------------------------------------------------
-  # 节点特定配置
-  # -------------------------------------------------------------------------
-  # 每个节点可以覆盖默认配置
-  # 节点名称对应工作流中的节点标识
-  # -------------------------------------------------------------------------
-  nodes:
-    # 基础节点：使用 DeepSeek Reasoner
-    simple_llm:
-      provider: deepseek
-      model: deepseek-reasoner
-      base_url: https://api.deepseek.com
-      api_key_env: DEEPSEEK_API_KEY
+  deepseek-reasoner:
+    provider: deepseek
+    model: deepseek-reasoner
+    name: DeepSeek Reasoner (思考模型)
+    base_url: https://api.deepseek.com
+  doubao-seed-1-8-251228:
+    provider: volcengine
+    model: doubao-seed-1-8-251228
+    name: 豆包1.8
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+  kimi-k2-thinking-251104:
+    provider: volcengine
+    model: kimi-k2-thinking-251104
+    name: Kimi K2
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+  doubao-seedream-4-5-251128:
+    provider: volcengine
+    model: seedream-4-5-251128
+    name: Doubao Seedream (图片生成)
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+  deepseek-chat:
+    provider: deepseek
+    model: deepseek-chat
+    name: DeepSeek Chat (对话模型)
+    base_url: https://api.deepseek.com
+nodes:
+  simple_llm:
+    model: deepseek-reasoner
+    overrides:
       params:
         max_tokens: 1024
         temperature: 0.7
-      timeout: 120  # seconds (Reasoner needs more time)
-
-    # 研究节点：使用经济型模型进行资料收集
-    research:
-      provider: deepseek
-      model: deepseek-reasoner
-      base_url: https://api.deepseek.com
-      api_key_env: DEEPSEEK_API_KEY
-      params:
-        max_tokens: 8192  # 增加以确保完整 JSON 输出
-        temperature: 0.3  # 降低随机性，确保准确性
-      timeout: 180  # seconds (research needs more time)
-
-    # 起草节点：使用强模型进行内容创作
-    draft:
-      provider: deepseek
-      model: deepseek-reasoner
-      base_url: https://api.deepseek.com
-      api_key_env: DEEPSEEK_API_KEY
+      timeout: 120
+  research:
+    model: deepseek-reasoner
+    overrides:
       params:
         max_tokens: 8192
-        temperature: 0.8  # 提高创造性
-      timeout: 180  # seconds
-
-    # 润色节点：使用中等模型进行内容优化
-    polish:
-      provider: deepseek
-      model: deepseek-reasoner
-      base_url: https://api.deepseek.com
-      api_key_env: DEEPSEEK_API_KEY
+        temperature: 0.3
+      timeout: 180
+  draft:
+    model: deepseek-reasoner
+    overrides:
+      params:
+        max_tokens: 8192
+        temperature: 0.5
+      timeout: 180
+  polish:
+    model: deepseek-reasoner
+    overrides:
       params:
         max_tokens: 4096
         temperature: 0.5
-      timeout: 120  # seconds
-
-    # 重写节点：使用最强模型进行智性叙事重写
-    rewrite:
-      provider: deepseek
-      model: deepseek-reasoner
-      base_url: https://api.deepseek.com
-      api_key_env: DEEPSEEK_API_KEY
+      timeout: 120
+  rewrite:
+    model: deepseek-reasoner
+    overrides:
       params:
         max_tokens: 8192
-        temperature: 0.9  # 高创造性，激发跨界思考
-      timeout: 180  # seconds
-
-    # 人化节点：去除 AI 味，增加活人感
-    humanize:
-      provider: deepseek
-      model: deepseek-reasoner
-      base_url: https://api.deepseek.com
-      api_key_env: DEEPSEEK_API_KEY
+        temperature: 0.75
+      timeout: 180
+  humanize:
+    model: deepseek-reasoner
+    overrides:
       params:
         max_tokens: 8192
-        temperature: 0.8  # 较高温度，增加自然表达
-      timeout: 120  # seconds
-
-    # 标题生成节点：使用 deepseek-chat（无推理过程，输出简洁）
-    title_gen:
-      provider: deepseek
-      model: deepseek-chat
-      base_url: https://api.deepseek.com
-      api_key_env: DEEPSEEK_API_KEY
+        temperature: 0.6
+      timeout: 120
+  title_gen:
+    model: deepseek-chat
+    overrides:
       params:
         max_tokens: 2048
-        temperature: 0.3  # 降低随机性，确保重生成时结果一致
-      timeout: 60  # seconds
-
-    # 图片提示词生成节点（并行节点，抑制流式输出）
-    image_prompt:
-      provider: deepseek
-      model: deepseek-chat
-      base_url: https://api.deepseek.com
-      api_key_env: DEEPSEEK_API_KEY
-      suppress_streaming: true  # 抑制流式输出（与 humanize 并行时）
+        temperature: 0.55
+      timeout: 60
+  image_prompt:
+    model: deepseek-chat
+    overrides:
       params:
         max_tokens: 2048
         temperature: 0.7
-      timeout: 60  # seconds (chat 模型响应更快)
-
-    # 图片生成节点（如使用 DALL-E）
-    image_gen:
-      provider: openai
-      model: dall-e-3
-      api_key_env: OPENAI_API_KEY
-      base_url: https://api.openai.com/v1
+      suppress_streaming: true
+      timeout: 60
+  image_gen:
+    model: doubao-seedream-4-5-251128
+    overrides:
       params:
-        size: "1024x1792"  # DALL-E 特定参数
-        quality: "standard"
-        style: "vivid"
-
-    # HTML 转换节点：使用经济型模型
-    html_convert:
-      provider: deepseek
-      model: deepseek-reasoner
-      base_url: https://api.deepseek.com
-      api_key_env: DEEPSEEK_API_KEY
+        size: 1024x1792
+        quality: standard
+        style: vivid
+  html_convert:
+    model: deepseek-reasoner
+    overrides:
       params:
-        max_tokens: 16384  # 长文档需要更多 token
-        temperature: 0.1  # 几乎确定性，保持格式
-      timeout: 240  # seconds (long document)
-
-    # 最终审核节点：使用最强模型确保质量
-    review:
-      provider: deepseek
-      model: deepseek-reasoner
-      base_url: https://api.deepseek.com
-      api_key_env: DEEPSEEK_API_KEY
+        max_tokens: 16384
+        temperature: 0.1
+      timeout: 240
+  review:
+    model: deepseek-reasoner
+    overrides:
       params:
         max_tokens: 2048
         temperature: 0.3
-      timeout: 120  # seconds
-
-    # 新增：测试节点 2（使用快速模型）
-    simple_llm_2:
-      provider: deepseek
-      model: deepseek-reasoner
-      base_url: https://api.deepseek.com
-      api_key_env: DEEPSEEK_API_KEY
+      timeout: 120
+  simple_llm_2:
+    model: deepseek-reasoner
+    overrides:
       params:
         max_tokens: 300
         temperature: 0.3
-      timeout: 120  # seconds
-
-    # 新增：测试节点 3（使用创意模型）
-    simple_llm_3:
-      provider: deepseek
-      model: deepseek-reasoner
-      base_url: https://api.deepseek.com
-      api_key_env: DEEPSEEK_API_KEY
+      timeout: 120
+  simple_llm_3:
+    model: deepseek-reasoner
+    overrides:
       params:
         max_tokens: 500
         temperature: 0.9
-      timeout: 120  # seconds
-
-# -----------------------------------------------------------------------------
-# Prompt 模板
-# -----------------------------------------------------------------------------
-# 每个节点的提示词模板
-# 支持多行文本和变量插值
-# -----------------------------------------------------------------------------
+      timeout: 120
 prompts:
-  # 研究节点 Prompt
   research: |
     你是一个专业的研究助理。请根据以下主题进行深度调研：
 
@@ -316,8 +146,6 @@ prompts:
 
     调研深度：{depth}
     时效性要求：{recency}
-
-  # 起草节点 Prompt
   draft: |
     你是一个专业的内容创作者。请根据以下调研报告撰写文章：
 
@@ -334,8 +162,6 @@ prompts:
     - 标题方案
     - 正文内容（Markdown 格式）
     - 关键词提取
-
-  # 润色节点 Prompt
   polish: |
     你是一个专业的内容编辑。请润色以下文章：
 
@@ -351,8 +177,6 @@ prompts:
     输出格式：
     - 润色后的文章（Markdown）
     - 修改说明
-
-  # Rewrite 节点 - 活人感×深度分层×写作三维公式×HKR
   rewrite_system: |
     # Role: 真诚且专业的活人创作者 + 主编型结构工程师
 
@@ -388,7 +212,6 @@ prompts:
     - 默认字数：1500–2000
     - **文末必须追加一个 HKR 尾标（用于程序解析，不要解释）**，格式固定为一行：
       [[HKR]] H=<0-5> K=<0-5> R=<0-5> [[/HKR]]
-
   rewrite_user: |
     # 写作任务：活人感×深度分层重写（标题必须逐字保留）
 
@@ -416,8 +239,6 @@ prompts:
     - 默认字数：1500–2000
     - 文末追加 HKR 尾标（不要解释），格式：
       [[HKR]] H=<0-5> K=<0-5> R=<0-5> [[/HKR]]
-
-  # 人化节点 Prompt（去机械化）
   humanize: |
     请对以下文章进行"去机械化"处理，同时完成格式清洗和风格重写。
 
@@ -438,8 +259,6 @@ prompts:
 
     待处理的文章：
     {content}
-
-  # 标题生成节点 Prompt
   title_gen: |
     请为以下文章生成 {num_titles} 个高吸引力的标题：
 
@@ -455,7 +274,6 @@ prompts:
     输出格式：
     - 标题列表（每行一个）
     - 每个标题的简要说明
-
   title_gen_system: |
     你是"轻雷击"标题生成器。你的任务是为文章生成克制、有观点、有一点点悬念/反差的标题。
 
@@ -486,7 +304,6 @@ prompts:
     {
       "titles": ["string", "string", "..."]
     }
-
   title_gen_user: |
     主题：{topic}
     平台：{platform}
@@ -519,8 +336,6 @@ prompts:
     {reference_titles}
 
     仅输出 JSON：{"titles":[...]}
-
-  # 图片提示词生成节点 Prompt
   image_prompt: |
     请根据以下文章内容生成配图提示词：
 
@@ -537,8 +352,6 @@ prompts:
     - 图片序号
     - 详细提示词（英文）
     - 对应文章段落
-
-  # HTML 转换节点 Prompt
   html_convert: |
     请将以下 Markdown 文章转换为微信公众号编辑器兼容的 HTML：
 
@@ -554,8 +367,6 @@ prompts:
     输出格式：
     - HTML 代码
     - 样式说明
-
-  # 最终审核节点 Prompt
   review: |
     请审核以下文章是否符合发布标准：
 
@@ -573,35 +384,3 @@ prompts:
     - 审核结果：通过/不通过
     - 问题列表（如有）
     - 改进建议（如有）
-
-# -----------------------------------------------------------------------------
-# 配置别名和锚点（高级用法）
-# -----------------------------------------------------------------------------
-# 使用 YAML 锚点和别名来复用配置
-#
-# 示例：
-#   _anthropic_credentials: &anthropic_creds
-#     api_key_env: ANTHROPIC_API_KEY
-#     base_url: https://api.anthropic.com
-#
-#   nodes:
-#     research:
-#       <<: *anthropic_creds
-#       model: claude-3-5-haiku-20241022
-#     draft:
-#       <<: *anthropic_creds
-#       model: claude-opus-4-5-20251101
-# -----------------------------------------------------------------------------
-
-# -----------------------------------------------------------------------------
-# 环境变量说明
-# -----------------------------------------------------------------------------
-# 需要在运行环境设置以下环境变量：
-#
-# export ANTHROPIC_API_KEY="sk-ant-..."
-# export OPENAI_API_KEY="sk-..."
-# export AZURE_OPENAI_API_KEY="..."
-# export DEEPSEEK_API_KEY="..."
-#
-# 推荐使用 .env 文件或系统环境变量管理
-# -----------------------------------------------------------------------------

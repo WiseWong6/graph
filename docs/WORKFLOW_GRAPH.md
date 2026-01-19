@@ -67,7 +67,7 @@ graph TD
 | 06_draft | Research + RAG → 初稿 | LLM | ✅ 验证通过 |
 | 07_rewrite | 智性叙事重写 (IPS+HKR) | LLM | ✅ 验证通过 |
 | 08_confirm | 确认图片数量和风格 | 交互 | ✅ 验证通过 |
-| 09_humanize | 去 AI 味 + 活人感 | LLM | ✅ 验证通过 |
+| 09_humanize | 先 LLM 重写（风格优化），再代码清洗（确定性规则） | LLM | ✅ 验证通过 |
 | 10_prompts | 生成图片提示词 (5种风格) | LLM | ✅ 验证通过 |
 | 11_images | Ark API 生成图片 | API | ✅ 验证通过 |
 | 12_upload | 上传到微信 CDN | API | ✅ 验证通过 |

@@ -76,7 +76,10 @@ export async function researchNode(state: ArticleState): Promise<Partial<Article
   const analysisResult = await analyzeWithLLM(
     inputDetection.topic,
     searchResults,
-    state.decisions?.selectedModel  // 传递用户选择的模型 ID
+    {
+      selectedModel: state.decisions?.selectedModel,
+      selectedModels: state.decisions?.selectedModels
+    }
   );
 
   // 计算置信度
@@ -243,7 +246,10 @@ async function analyzeWithLLM(
     url: string;
     description?: string;
   }>,
-  selectedModelId?: string  // 新增：用户选择的模型 ID
+  selection?: {
+    selectedModel?: string;
+    selectedModels?: Record<string, string>;
+  }
 ): Promise<{
   findings: Finding[];
   key_insights?: string[];
@@ -390,7 +396,7 @@ ${searchResultsText}
 3. 数据和观点必须来自搜索结果，不要编造`;
 
   try {
-    const { response } = await callLLMWithFallback(selectedModelId, "research", {
+    const { response } = await callLLMWithFallback(selection, "research", {
       prompt,
       systemMessage: "你是一位资深的内容创作调研专家。输出完整的 Markdown 调研报告，确保结构清晰、内容详实。"
     });

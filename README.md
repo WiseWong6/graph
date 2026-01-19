@@ -150,30 +150,34 @@ write-agent/
 ### LLM 配置 (`config/llm.yaml`)
 
 ```yaml
-research:
-  provider: deepseek
+defaults:
   model: deepseek-reasoner
 
-draft:
-  provider: deepseek
-  model: deepseek-reasoner
+providers:
+  deepseek:
+    type: openai_compat
+    api_key_env: DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com
 
-rewrite:
-  provider: deepseek
-  model: deepseek-reasoner
+models:
+  deepseek-reasoner:
+    name: "DeepSeek Reasoner (思考模型)"
+    provider: deepseek
+    model: deepseek-reasoner
+    defaults:
+      params:
+        max_tokens: 8192
+        temperature: 0.3
 
-humanize:
-  provider: deepseek
-  model: deepseek-reasoner
-
-title_gen:
-  provider: deepseek
-  model: deepseek-chat
-
-image_prompt:
-  provider: deepseek
-  model: deepseek-chat
+nodes:
+  research:
+    model: deepseek-reasoner
+    overrides:
+      params:
+        temperature: 0.3
 ```
+
+模型选择支持三种模式：使用默认配置、选择全局模型、按节点覆盖模型。
 
 ## Architecture
 

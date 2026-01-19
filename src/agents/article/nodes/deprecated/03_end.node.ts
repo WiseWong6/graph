@@ -1,4 +1,4 @@
-import { ArticleState } from "../state";
+import { ArticleState } from "../../state";
 
 /**
  * End node for article generation workflow

@@ -102,11 +102,14 @@ export async function draftNode(state: ArticleState): Promise<Partial<ArticleSta
 
   try {
     const { response, config } = await callLLMWithFallback(
-      state.decisions?.selectedModel,
+      {
+        selectedModel: state.decisions?.selectedModel,
+        selectedModels: state.decisions?.selectedModels
+      },
       "draft",
       {
-      prompt,
-      systemMessage: DRAFT_SYSTEM_MESSAGE
+        prompt,
+        systemMessage: DRAFT_SYSTEM_MESSAGE
       }
     );
 

@@ -121,7 +121,10 @@ export async function titlesNode(state: ArticleState): Promise<Partial<ArticleSt
 
   try {
     const { response, config } = await callLLMWithFallback(
-      state.decisions?.selectedModel,
+      {
+        selectedModel: state.decisions?.selectedModel,
+        selectedModels: state.decisions?.selectedModels
+      },
       "title_gen",
       { prompt, systemMessage }
     );

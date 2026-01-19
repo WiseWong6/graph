@@ -1,7 +1,7 @@
 import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { v4 as uuidv4 } from "uuid";
-import { ArticleState } from "../state";
+import { ArticleState } from "../../state";
 
 /**
  * Save generated text to file system

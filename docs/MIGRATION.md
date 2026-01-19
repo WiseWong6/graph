@@ -1,19 +1,19 @@
-# Migration Guide
+# 迁移指南
 
-## From Python LangGraph to TypeScript
+## 从 Python LangGraph 到 TypeScript
 
-This project adapts concepts from the Python LangGraph tutorials to TypeScript.
+本项目将 Python LangGraph 教程的概念适配到 TypeScript。
 
-### Key Differences
+### 主要差异
 
-1. **Type Definitions**: TypeScript interfaces replace Python dataclasses
-2. **Async/Await**: Uses JavaScript promises instead of Python coroutines
-3. **Module System**: ES modules instead of Python imports
-4. **Configuration**: YAML files instead of Python config objects
+1. **类型定义**：TypeScript 接口替代 Python dataclass
+2. **Async/Await**：使用 JavaScript Promise 替代 Python 协程
+3. **模块系统**：ES 模块替代 Python 导入
+4. **配置**：YAML 文件替代 Python 配置对象
 
-### Example Comparison
+### 示例对比
 
-**Python:**
+**Python：**
 ```python
 from typing import TypedDict
 
@@ -22,7 +22,7 @@ class AgentState(TypedDict):
     content: str
 ```
 
-**TypeScript:**
+**TypeScript：**
 ```typescript
 interface AgentState {
   topic: string;
@@ -30,9 +30,9 @@ interface AgentState {
 }
 ```
 
-## Coming from LangChain Python
+## 从 LangChain Python 迁移
 
-If you're familiar with LangChain Python:
+如果你熟悉 LangChain Python：
 
 | LangChain Python | LangGraph.js (TS) |
 |-----------------|-------------------|
@@ -41,4 +41,4 @@ If you're familiar with LangChain Python:
 | `StateGraph` | `StateGraph` |
 | `MemorySaver` | `MemorySaver` |
 
-The concepts transfer directly, only syntax differs.
+概念可以直接迁移，只是语法不同。

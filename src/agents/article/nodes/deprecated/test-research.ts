@@ -7,8 +7,8 @@
  * 3. 搜索结果质量
  */
 
-import { researchNode } from "./02_research.node.js";
-import type { ArticleState } from "../state.js";
+import { researchNode } from "../02_research.node.js";
+import type { ArticleState } from "../../state.js";
 
 /**
  * 测试 Research 节点
@@ -78,7 +78,7 @@ async function testSearchCapabilities() {
   console.log("");
 
   // 导入适配器 - 使用 WebSearchAdapter
-  const { WebSearchAdapter } = await import("../../../adapters/web-search.js");
+  const { WebSearchAdapter } = await import("../../../../adapters/web-search.js");
   const adapter = new WebSearchAdapter();
 
   // 健康检查

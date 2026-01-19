@@ -1,4 +1,9 @@
-import { getDynamicLLMConfig, getNodeLLMConfig, type LLMNodeConfig } from "../config/llm.js";
+import {
+  getNodeLLMConfig,
+  resolveNodeLLMConfig,
+  type LLMNodeConfig,
+  type LLMSelection
+} from "../config/llm.js";
 import { LLMClient, type LLMCallOptions, type LLMResponse } from "./llm-client.js";
 
 export interface LLMCallResult {
@@ -8,18 +13,18 @@ export interface LLMCallResult {
 }
 
 export async function callLLMWithFallback(
-  selectedModelId: string | undefined,
+  selection: LLMSelection | undefined,
   nodeId: string,
   options: LLMCallOptions
 ): Promise<LLMCallResult> {
-  const primaryConfig = getDynamicLLMConfig(selectedModelId, nodeId);
+  const { config: primaryConfig, usedOverride } = resolveNodeLLMConfig(nodeId, selection);
   const primaryClient = new LLMClient(primaryConfig);
 
   try {
     const response = await primaryClient.call(options);
     return { response, config: primaryConfig, usedFallback: false };
   } catch (error) {
-    if (!selectedModelId) {
+    if (!usedOverride) {
       throw error;
     }
 
