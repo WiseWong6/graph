@@ -200,9 +200,8 @@ const fullArticleWorkflow = new StateGraph(ArticleAnnotation)
   .addEdge("01_research", "02_rag")
   .addEdge("01_research", "03_titles")
 
-  // 两者都完成后，才能选择标题（LangGraph 自动等待所有入边完成）
-  .addEdge("02_rag", "gate_c_select_title")
-  .addEdge("03_titles", "gate_c_select_title")
+  // 两者都完成后，才能选择标题（使用 join 边确保同步）
+  .addEdge(["02_rag", "03_titles"], "gate_c_select_title")
 
   // Gate C 条件边：根据用户选择决定下一步
   // - 如果选择"重新生成标题"：回到 03_titles
@@ -237,10 +236,9 @@ const fullArticleWorkflow = new StateGraph(ArticleAnnotation)
   .addEdge("10_images", "11_upload")
   .addEdge("11_upload", "wait_for_upload")
 
-  // 汇聚点：html 等待 humanize 和 wait_for_upload 都完成
+  // 汇聚点：html 等待 humanize 和 wait_for_upload 都完成（使用 join 边确保同步）
   // wait_for_upload 只在 11_upload 完成后才触发，确保 12_html 在正确时机执行
-  .addEdge("wait_for_upload", "12_html")
-  .addEdge("08_humanize", "12_html")
+  .addEdge(["wait_for_upload", "08_humanize"], "12_html")
 
   // 后续节点
   .addEdge("12_html", "13_draftbox")

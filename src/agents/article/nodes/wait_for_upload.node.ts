@@ -1,13 +1,12 @@
 /**
  * Wait For Upload 节点 - 并行同步点
  *
- * 职责: 等待 10_images 完成后再让 08_humanize 继续
+ * 职责: 作为 12_html 的同步点，确保 11_upload 完成后再汇聚
  *
  * 解决的问题:
- * - 08_humanize 和 09_prompts→10_images 并行执行
+ * - 08_humanize 和 09_prompts→10_images→11_upload 并行执行
  * - 12_html 需要等待 08_humanize AND 11_upload 都完成
- * - 但 LangGraph 可能在 08_humanize 完成时就触发 12_html
- * - 此节点确保 08_humanize 分支等待 10_images 完成后才触发 12_html
+ * - 此节点仅作为图片分支完成后的同步点
  *
  * 数据流:
  * (等待 imagePaths 存在) → 12_html
@@ -34,7 +33,7 @@ export async function waitForUploadNode(state: ArticleState): Promise<Partial<Ar
   }
 
   console.log(`[wait_for_upload] imagePaths exists with ${state.imagePaths.length} paths`);
-  console.log("[wait_for_upload] 10_images has completed, allowing 08_humanize to proceed");
+  console.log("[wait_for_upload] 11_upload has completed, waiting to join with 08_humanize");
   console.log("[wait_for_upload] ========== END ==========");
 
   // 不需要返回任何状态更新，只是作为同步点
