@@ -29,7 +29,7 @@ import { ErrorHandler, ValidationError, retry } from "../../../utils/errors.js";
 config({ path: resolve(process.cwd(), ".env") });
 
 // 创建节点日志
-const log = createLogger("08_humanize");
+const log = createLogger("09_humanize");
 
 /**
  * Humanize 节点主函数
@@ -38,8 +38,18 @@ const log = createLogger("08_humanize");
  * @returns 更新的状态
  */
 export async function humanizeNode(state: ArticleState): Promise<Partial<ArticleState>> {
+  const startTime = Date.now();
+
+  // 新增：打印 state.decisions 诊断状态
+  console.log("[09_humanize] State check:", {
+    hasDecisions: !!state.decisions,
+    selectedModel: state.decisions?.selectedModel,
+    allDecisionKeys: state.decisions ? Object.keys(state.decisions) : []
+  });
+
+  console.log("⏳ [09_humanize] 去机械化处理中...");
+
   const timer = log.timer("humanize");
-  log.startStep("validate_input");
 
   // ========== 验证输入 ==========
   // 优先使用 rewritten，降级到 draft
@@ -49,18 +59,12 @@ export async function humanizeNode(state: ArticleState): Promise<Partial<Article
     throw new ValidationError("Content not found in state (need rewritten or draft)", "rewritten|draft");
   }
 
-  const sourceType = state.rewritten ? "rewritten" : "draft";
-  log.completeStep("validate_input", { sourceType, inputLength: input.length });
-
   // ========== 构建 Prompt ==========
-  log.startStep("build_prompt");
   // 从 confirm 节点获取用户确认的图片数量
   const imageCount = state.decisions?.images?.count || 0;
   const prompt = buildHumanizePrompt(input, imageCount);
-  log.completeStep("build_prompt", { promptLength: prompt.length, imageCount });
 
   // ========== 调用 LLM ==========
-  log.startStep("llm_call");
   try {
     // 使用重试机制调用 LLM
     const result = await retry(
@@ -71,28 +75,14 @@ export async function humanizeNode(state: ArticleState): Promise<Partial<Article
       { maxAttempts: 3, delay: 1000 }
     )();
 
-    log.info("LLM config:", { model: result.config.model, temperature: result.config.temperature });
-
-    log.completeStep("llm_call", {
-      outputLength: result.response.text.length,
-      usage: result.response.usage
-    });
-
     let humanized = result.response.text;
     const boldResult = restoreBoldMarkers(humanized, input);
     humanized = boldResult.text;
-    if (boldResult.restored > 0) {
-      log.info("Restored bold markers", { restored: boldResult.restored });
-    }
 
     const imageResult = ensureImagePlaceholders(humanized, imageCount);
     humanized = imageResult.text;
-    if (imageResult.added > 0) {
-      log.info("Added missing image placeholders", { added: imageResult.added });
-    }
 
     // ========== 保存人化稿 ==========
-    log.startStep("save_output");
     const outputPath = state.outputPath || getDefaultOutputPath();
     const humanizeDir = join(outputPath, "humanize");
 
@@ -103,19 +93,26 @@ export async function humanizeNode(state: ArticleState): Promise<Partial<Article
     const humanizedPath = join(humanizeDir, "08_humanized.md");
     writeFileSync(humanizedPath, humanized, "utf-8");
 
-    log.completeStep("save_output", { path: humanizedPath });
-    log.success(`Complete in ${timer.log()}`);
+    console.log(`✅ [09_humanize] 完成 (${timer.log().replace("Complete in ", "")})`);
+
+    const executionTime = Date.now() - startTime;
 
     return {
       humanized,
-      outputPath
+      outputPath,
+      decisions: {
+        ...state.decisions,
+        timings: {
+          ...state.decisions?.timings,
+          "09_humanize": executionTime
+        }
+      }
     };
   } catch (error) {
-    log.failStep("llm_call", error);
-    ErrorHandler.handle(error, "08_humanize");
+    console.error(`❌ [09_humanize] 失败: ${error}`);
+    ErrorHandler.handle(error, "09_humanize");
 
     // 降级: 返回原输入
-    log.warn("Fallback to input content");
     return {
       humanized: input
     };

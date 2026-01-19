@@ -196,8 +196,9 @@ function recommendStyle(content: string): ImageStyle {
  *
  * @param input - 用户输入
  * @param recommendedStyle - 推荐的风格
+ * @param recommendedCount - 推荐的数量（降级时使用）
  */
-function parseImageConfig(input: string, recommendedStyle: ImageStyle): ImageConfig {
+function parseImageConfig(input: string, recommendedStyle: ImageStyle, recommendedCount: number): ImageConfig {
   const config: ImageConfig = {
     confirmed: false,
     count: 4,
@@ -231,10 +232,13 @@ function parseImageConfig(input: string, recommendedStyle: ImageStyle): ImageCon
     }
   }
 
-  // 解析数量
-  const countMatch = text.match(/(\d+)\s*[张张]/);
+  // 解析数量（支持纯数字或"3张"格式）
+  const countMatch = text.match(/(\d+)/);
   if (countMatch) {
     config.count = parseInt(countMatch[1], 10);
+  } else {
+    // 降级到推荐值
+    config.count = recommendedCount;
   }
 
   return config;
@@ -335,7 +339,7 @@ async function confirmImagesNodeWithTiming(
   promptWaitMs += Date.now() - countStart;
 
   // ========== 步骤4: 解析配置 ==========
-  const config = parseImageConfig(countInput, selectedStyle);
+  const config = parseImageConfig(countInput, selectedStyle, recommendedCount);
 
   console.log("\n=== 配置确认 ===");
   console.log(`风格: ${STYLE_NAMES[config.style]}`);

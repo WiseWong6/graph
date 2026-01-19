@@ -1,5 +1,5 @@
 /**
- * Upload Images 节点 v2 - 修复版
+ * Upload Images 节点 v3 - 带回退机制
  *
  * 职责: 上传本地图片到微信 CDN (图文消息图片)
  *
@@ -10,17 +10,122 @@
  * - 使用正确的 API: /media/uploadimg (图文消息图片)
  * - 使用 form-data 上传
  * - 返回 CDN URL
+ * - 如果 wechat 配置缺失，自动调用选择逻辑（回退机制）
  */
 
 import FormData from "form-data";
 import { readFileSync, existsSync } from "fs";
-import { ArticleState } from "../state";
+import { ArticleState, WechatConfig } from "../state";
 import { parallelMap } from "../../../utils/concurrency.js";
+import { config } from "dotenv";
+
+// 加载环境变量
+config({ path: process.cwd() + "/.env" });
+
+/**
+ * 微信公众号配置
+ */
+interface WeChatAccount {
+  id: string;
+  name: string;
+  appId: string;
+  appSecret: string;
+}
+
+/**
+ * 可用的公众号列表
+ */
+const WECHAT_ACCOUNTS: WeChatAccount[] = [
+  {
+    id: "account1",
+    name: "人类是我的副业",
+    appId: process.env.WECHAT_APP_ID_1 || "",
+    appSecret: process.env.WECHAT_APP_SECRET_1 || ""
+  },
+  {
+    id: "account2",
+    name: "歪斯Wise",
+    appId: process.env.WECHAT_APP_ID_2 || "",
+    appSecret: process.env.WECHAT_APP_SECRET_2 || ""
+  }
+];
+
+/**
+ * 交互提示函数类型
+ */
+type InteractivePrompt = <T = unknown>(
+  questions: unknown
+) => Promise<T>;
+
+/**
+ * 默认交互提示函数
+ */
+let promptFn: InteractivePrompt | null = null;
+
+async function getPromptFn(): Promise<InteractivePrompt> {
+  if (!promptFn) {
+    const inquirerModule = await import("inquirer");
+    promptFn = inquirerModule.default.prompt as InteractivePrompt;
+  }
+  return promptFn;
+}
+
+/**
+ * 回退：让用户选择公众号
+ *
+ * 当 state.decisions.wechat 缺失时调用
+ */
+async function promptForWechat(): Promise<WechatConfig> {
+  console.log("\n=== ⚠️  微信配置缺失 ===");
+  console.log("检测到恢复的会话中没有微信公众号配置，请重新选择：\n");
+
+  const prompt = await getPromptFn();
+
+  // 过滤出配置完整的公众号
+  const availableAccounts = WECHAT_ACCOUNTS.filter(
+    acc => acc.appId && acc.appSecret
+  );
+
+  if (availableAccounts.length === 0) {
+    console.error("❌ 没有配置完整的公众号！");
+    console.error("请在 .env 中配置 WECHAT_APP_ID_1 和 WECHAT_APP_SECRET_1");
+    throw new Error("No WeChat account configured");
+  }
+
+  const answer = await prompt<{ accountId: string }>([
+    {
+      type: "list",
+      name: "accountId",
+      message: "请选择公众号账号:",
+      choices: availableAccounts.map(acc => ({
+        name: acc.name,
+        value: acc.id
+      }))
+    }
+  ]);
+
+  const selectedAccount = availableAccounts.find(
+    acc => acc.id === answer.accountId
+  );
+
+  if (!selectedAccount) {
+    throw new Error(`Selected account not found: ${answer.accountId}`);
+  }
+
+  console.log(`\n✅ 已选择: ${selectedAccount.name}\n`);
+
+  return {
+    account: selectedAccount.id,
+    name: selectedAccount.name,
+    appId: selectedAccount.appId,
+    appSecret: selectedAccount.appSecret
+  };
+}
 
 /**
  * 微信 API 配置
  */
-interface WechatConfig {
+interface WechatApiConfig {
   appId: string;
   appSecret: string;
   apiUrl: string;
@@ -58,18 +163,22 @@ export async function uploadImagesNode(state: ArticleState): Promise<Partial<Art
   }
 
   // 使用 select_wechat 节点选择的微信配置
-  const config = state.decisions?.wechat;
+  let wechatConfig = state.decisions?.wechat;
 
-  if (!config) {
-    throw new Error("WeChat config not found in state. Please run select_wechat first.");
+  // 回退机制：如果 wechat 配置缺失，提示用户选择
+  if (!wechatConfig) {
+    console.warn("[11.5_upload] ⚠️  微信配置缺失，触发回退机制...");
+    wechatConfig = await promptForWechat();
+    // 将选择的配置保存到 state 中
+    console.log("[11.5_upload] ✅ 微信配置已保存");
   }
 
   console.log(`[11.5_upload] Uploading ${state.imagePaths.length} images...`);
 
   // 构建 uploadImage 函数期望的配置（添加 apiUrl）
-  const uploadConfig = {
-    appId: config.appId,
-    appSecret: config.appSecret,
+  const uploadConfig: WechatApiConfig = {
+    appId: wechatConfig.appId,
+    appSecret: wechatConfig.appSecret,
     apiUrl: "https://api.weixin.qq.com"
   };
 
@@ -120,9 +229,20 @@ export async function uploadImagesNode(state: ArticleState): Promise<Partial<Art
   console.log("[11.5_upload] Returning uploadedImageUrls:", uploadedUrls);
   console.log("[11.5_upload] ========== END ==========");
 
-  return {
+  // 返回上传结果和 wechat 配置（如果使用了回退机制）
+  const result: Partial<ArticleState> = {
     uploadedImageUrls: uploadedUrls
   };
+
+  // 如果使用了回退机制，需要保存 wechat 配置到 state
+  if (!state.decisions?.wechat) {
+    result.decisions = {
+      ...state.decisions,
+      wechat: wechatConfig
+    };
+  }
+
+  return result;
 }
 
 /**
@@ -133,7 +253,7 @@ export async function uploadImagesNode(state: ArticleState): Promise<Partial<Art
  */
 async function uploadImage(
   imageBuffer: Buffer,
-  config: WechatConfig
+  config: WechatApiConfig
 ): Promise<string> {
   // 首先获取 access_token
   const token = await getAccessToken(config);
@@ -179,7 +299,7 @@ async function uploadImage(
  *
  * 文档: https://developers.weixin.qq.com/doc/offiaccount/Basic_Information/getStableAccessToken.html
  */
-async function getAccessToken(config: WechatConfig): Promise<string> {
+async function getAccessToken(config: WechatApiConfig): Promise<string> {
   const response = await fetch(
     `${config.apiUrl}/cgi-bin/stable_token`,
     {

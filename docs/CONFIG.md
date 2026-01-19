@@ -1,5 +1,8 @@
 # Configuration Guide
 
+> **⚠️ 注意**：此文档描述旧版 OpenAI 配置，仅供参考。
+> 当前配置请参考 `config/llm.yaml` 和 `README.md`。
+
 ## LLM Configuration (`config/llm.yaml`)
 
 ### Models

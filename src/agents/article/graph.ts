@@ -19,6 +19,7 @@ import { selectTitleNode } from "./nodes/05_select_title.node";
 import { researchNode } from "./nodes/02_research.node";
 import { ragNode } from "./nodes/03_rag.node";
 import { titlesNode } from "./nodes/04_titles.node";
+import { titlesRegenerateNode } from "./nodes/04_titles_regenerate.node";
 import { draftNode } from "./nodes/06_draft.node";
 import { rewriteNode } from "./nodes/07_rewrite.node";
 import { confirmImagesNode } from "./nodes/08_confirm.node";
@@ -179,6 +180,7 @@ const fullArticleWorkflow = new StateGraph(ArticleAnnotation)
   .addNode("02_research", researchNode)
   .addNode("03_rag", ragNode)
   .addNode("04_titles", titlesNode)
+  .addNode("04_titles_regenerate", titlesRegenerateNode)
   .addNode("06_draft", draftNode)
   .addNode("07_rewrite", rewriteNode)
   .addNode("09_humanize", humanizeNode)
@@ -210,7 +212,7 @@ const fullArticleWorkflow = new StateGraph(ArticleAnnotation)
   .addEdge(["03_rag", "04_titles"], "gate_c_select_title")
 
   // Gate C 条件边：根据用户选择决定下一步
-  // - 如果选择"重新生成标题"：回到 04_titles
+  // - 如果选择"重新生成标题"：走专门的重新生成节点（避免 join edge 冲突）
   // - 否则：继续到 06_draft
   .addConditionalEdges(
     "gate_c_select_title",
@@ -221,10 +223,12 @@ const fullArticleWorkflow = new StateGraph(ArticleAnnotation)
       return "continue";
     },
     {
-      regenerate: "04_titles",
+      regenerate: "04_titles_regenerate",
       continue: "06_draft"
     }
   )
+  // 重新生成后回到选择节点（使用单边，不是 join，避免冲突）
+  .addEdge("04_titles_regenerate", "gate_c_select_title")
   .addEdge("06_draft", "07_rewrite")
 
   // 并行起点：从 07_rewrite 进入 confirm 节点

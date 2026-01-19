@@ -223,9 +223,7 @@ data/
   - Second parallel layer: prompts + humanize after Confirm
 - **IndexManager idempotency protection** (NEW)
 - **LanceDB vector store TypeScript fixes** (NEW)
-
-⚠️ **Pending:**
-- Vector index construction (network issue, requires manual run when network is stable)
+- **Vector index construction completed** (UPDATED)
 
 📋 **Planned:**
 - Workflow end-to-end testing

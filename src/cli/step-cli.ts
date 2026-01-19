@@ -50,6 +50,15 @@ const NODE_INFO: Record<string, { name: string; description: string; hasOutput: 
   "end": { name: "完成", description: "清理和确认", hasOutput: false, isInteractive: false },
 };
 
+const STREAM_FOCUS_NODE = "09_humanize";
+const DEFERRED_NODES_DURING_STREAM = new Set([
+  "10_prompts", "11_images", "12_upload", "13_wait_for_upload"
+]);
+const DEFERRED_LOG_PREFIXES = [
+  "[10_prompts]",
+  "[10_images]",
+  "[11.5_upload]"
+];
 
 /**
  * 用户交互菜单
@@ -157,52 +166,219 @@ function renderSeparator(width: number, title?: string): string {
   return `+${"-".repeat(left)}${paddedTitle}${"-".repeat(right)}+`;
 }
 
+/**
+ * 格式化持续时间 - 自动选择合适的单位
+ */
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return remainingSeconds > 0
+    ? `${minutes}m ${remainingSeconds}s`
+    : `${minutes}m`;
+}
+
 function showTimingDashboard(
-  summaries: TimingSummary[],
+  _summaries: TimingSummary[],
   workflowStartTime: number,
-  totalWaitMs: number,
+  _totalWaitMs: number,  // 参数保留用于兼容，但不再使用
   threadId: string
 ): void {
   const totalDuration = Date.now() - workflowStartTime;
-  const computeDuration = Math.max(0, totalDuration - totalWaitMs);
   const width = 78;
 
   console.log("");
   console.log(renderSeparator(width, "TASK TIME DASHBOARD"));
   console.log(renderDashboardLine(`Run: ${threadId}  Mode: step`, width));
-  console.log(renderDashboardLine(
-    `Total (wall): ${(totalDuration / 1000).toFixed(1)}s  ` +
-    `Wait excluded: ${(totalWaitMs / 1000).toFixed(1)}s  ` +
-    `Compute: ${(computeDuration / 1000).toFixed(1)}s`,
-    width
-  ));
+  console.log(renderDashboardLine(`Total: ${formatDuration(totalDuration)}`, width));
+  console.log(renderSeparator(width));
+}
 
-  if (summaries.length === 0) {
-    console.log(renderSeparator(width, "Nodes (compute)"));
-    console.log(renderDashboardLine("No node timing data.", width));
-    console.log(renderSeparator(width));
+/**
+ * 统一退出处理 - 确保任何退出都输出统计
+ */
+async function exitWithSummary(
+  threadId: string,
+  timingSummaries: TimingSummary[],
+  workflowStartTime: number,
+  interactiveWaitMs: number,
+  isComplete: boolean,
+  error?: unknown
+): Promise<never> {
+  console.log("\n" + "═".repeat(60));
+  if (isComplete) {
+    console.log(chalk.green.bold("🎉 流程完成！"));
+  } else if (error) {
+    console.log(chalk.red.bold("❌ 流程异常终止"));
+  } else {
+    console.log(chalk.yellow.bold("⏸️  流程已暂停"));
+  }
+  console.log("═".repeat(60) + "\n");
+
+  // 输出耗时统计
+  showTimingDashboard(timingSummaries, workflowStartTime, interactiveWaitMs, threadId);
+
+  // 如果有错误，显示错误信息
+  if (error) {
+    console.error(chalk.red("错误信息:"), error);
+    console.log(chalk.gray(`\n使用 --resume 可从当前状态继续\n`));
+    console.log(chalk.gray(`Thread ID: ${threadId}\n`));
+  } else if (!isComplete) {
+    console.log(chalk.gray(`使用 --resume 可从当前状态继续\n`));
+    console.log(chalk.gray(`Thread ID: ${threadId}\n`));
+  }
+
+  process.exit(isComplete ? 0 : 1);
+}
+
+/**
+ * 节点错误处理 - 提供重试/跳过/从某节点重新运行选项
+ */
+async function handleNodeError(
+  error: unknown,
+  threadId: string,
+  timingSummaries: TimingSummary[],
+  workflowStartTime: number,
+  interactiveWaitMs: number,
+  stateValue?: { prompt?: string }
+): Promise<void> {
+  console.log("\n" + "═".repeat(60));
+  console.log(chalk.red.bold("❌ 节点执行失败"));
+  console.log("═".repeat(60) + "\n");
+
+  // 显示错误信息
+  const errorMsg = error instanceof Error ? error.message : String(error);
+  const errorStack = error instanceof Error ? error.stack : undefined;
+  console.error(chalk.red("错误:"), errorMsg);
+
+  if (errorStack && process.env.DEBUG) {
+    console.log(chalk.gray("\n堆栈信息:"));
+    console.log(chalk.gray(errorStack.split("\n").slice(1, 5).join("\n")));
+  }
+
+  // Linus原则："Never break userspace" - 让用户决定是否重试
+  // 所有错误都可重试，因为：
+  // 1. 用户最清楚是否应该重试
+  // 2. 配置缺失可以通过修改 state 后重试
+  // 3. 临时错误（网络/API）和逻辑错误都应该给用户选择权
+  const isRetryable = true;
+
+  console.log(chalk.gray("\n提示: 所有错误都允许重试\n"));
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  const answer = await new Promise<string>((resolve) => {
+    const prompt = isRetryable
+      ? chalk.yellow("选择操作 [r=重试, s=跳过, n=从某节点重新运行, q=退出]: ")
+      : chalk.yellow("选择操作 [n=从某节点重新运行, q=退出]: ");
+    rl.question(prompt, (ans) => {
+      rl.close();
+      resolve(ans.trim().toLowerCase());
+    });
+  });
+
+  // 重试
+  if (answer === "r" && isRetryable) {
+    console.log(chalk.cyan("\n🔄 重试中...\n"));
+    try {
+      const { fullArticleGraph: graph } = await import("../agents/article/graph.js");
+      const config = { configurable: { thread_id: threadId } };
+      // 重新执行流程（LangGraph 会从当前 checkpoint 继续）
+      await graph.invoke(null, config);
+      // 成功后正常退出
+      await exitWithSummary(threadId, timingSummaries, workflowStartTime, interactiveWaitMs, true);
+    } catch (retryError) {
+      // 重试失败，递归处理
+      await handleNodeError(retryError, threadId, timingSummaries, workflowStartTime, interactiveWaitMs, stateValue);
+    }
     return;
   }
 
-  console.log(renderSeparator(width, "Nodes (compute)"));
-
-  const ordered = [...summaries].sort((a, b) => a.startTime - b.startTime);
-  const maxDuration = Math.max(...ordered.map(item => item.duration), 1);
-  const labelWidth = 16;
-  const durationWidth = 7;
-  const innerWidth = width - 2;
-
-  for (const item of ordered) {
-    const label = item.displayName.padEnd(labelWidth, " ");
-    const durationText = `${(item.duration / 1000).toFixed(1)}s`.padStart(durationWidth, " ");
-    const prefix = `${label} ${durationText} |`;
-    const barWidth = Math.max(4, innerWidth - prefix.length);
-    const barLength = Math.max(1, Math.round((item.duration / maxDuration) * barWidth));
-    const bar = "#".repeat(barLength).padEnd(barWidth, " ");
-    console.log(renderDashboardLine(prefix + bar, width));
+  // 跳过
+  if (answer === "s" && isRetryable) {
+    console.log(chalk.yellow("\n⏭️  跳过当前节点"));
+    console.log(chalk.gray("注意：跳过可能导致后续节点失败\n"));
+    try {
+      const { fullArticleGraph: graph } = await import("../agents/article/graph.js");
+      const config = { configurable: { thread_id: threadId } };
+      // 继续执行
+      await graph.invoke(null, config);
+      await exitWithSummary(threadId, timingSummaries, workflowStartTime, interactiveWaitMs, true);
+    } catch (continueError) {
+      await handleNodeError(continueError, threadId, timingSummaries, workflowStartTime, interactiveWaitMs, stateValue);
+    }
+    return;
   }
 
-  console.log(renderSeparator(width));
+  // 从某节点重新运行
+  if (answer === "n") {
+    console.log(chalk.cyan("\n📋 可用节点列表:\n"));
+
+    // 显示所有节点
+    const nodeEntries = Object.entries(NODE_INFO);
+    nodeEntries.forEach(([key, info], index) => {
+      const status = timingSummaries.some(s => s.nodeName === key)
+        ? chalk.green("✓")
+        : chalk.gray("○");
+      console.log(chalk.gray(`[${index.toString().padStart(2, " ")}]`) +
+                  chalk.white(` ${status} `) +
+                  chalk.cyan(info.name));
+      console.log(chalk.gray(`     ${info.description}`));
+    });
+
+    const nodeAnswer = await new Promise<string>((resolve) => {
+      const rl2 = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+      rl2.question(
+        chalk.yellow("\n输入节点编号或按 Enter 取消: "),
+        (ans) => {
+          rl2.close();
+          resolve(ans.trim());
+        }
+      );
+    });
+
+    if (nodeAnswer) {
+      const nodeIndex = parseInt(nodeAnswer, 10);
+      if (!isNaN(nodeIndex) && nodeIndex >= 0 && nodeIndex < nodeEntries.length) {
+        const selectedNodeKey = nodeEntries[nodeIndex][0];
+        console.log(chalk.cyan(`\n🔄 从节点 "${NODE_INFO[selectedNodeKey].name}" 重新运行...\n`));
+
+        // 需要重置状态到该节点之前
+        // 由于 LangGraph 的限制，我们需要创建新的 thread 并重新运行到该节点
+        // 这是一个简化实现，实际可能需要更复杂的 checkpoint 管理
+        console.log(chalk.yellow("注意：将从头重新运行到该节点\n"));
+
+        try {
+          const newThreadId = `step-article-${Date.now()}`;
+          const { fullArticleGraph: graph } = await import("../agents/article/graph.js");
+          const config = { configurable: { thread_id: newThreadId } };
+
+          console.log(chalk.gray(`新 Thread ID: ${newThreadId}\n`));
+
+          // 重新开始流程
+          await graph.invoke({ prompt: stateValue?.prompt || "" }, config);
+          await exitWithSummary(newThreadId, [], workflowStartTime, interactiveWaitMs, true);
+        } catch (rerunError) {
+          await handleNodeError(rerunError, threadId, timingSummaries, workflowStartTime, interactiveWaitMs, stateValue);
+        }
+        return;
+      }
+    }
+
+    console.log(chalk.gray("取消重新运行\n"));
+  }
+
+  // 退出（默认）
+  await exitWithSummary(threadId, timingSummaries, workflowStartTime, interactiveWaitMs, false, error);
 }
 
 /**
@@ -271,6 +447,51 @@ export async function main() {
   console.log(chalk.gray("开始执行..."));
   console.log(chalk.gray("═══════════════════════════════════════════════════════════\n"));
 
+  // 在 try 块外定义变量，以便 catch 块可以访问
+  // 并行执行追踪器
+  interface ParallelTracker {
+    activeNodes: Map<string, number>;
+    completedNodes: Set<string>;
+    lastState: ArticleState | null;
+    isWaitingForInteraction: boolean;
+    parallelCompletionSummaries: Map<string, { displayName: string; duration: string }>;
+    interactiveWaitMs: Map<string, number>;
+    postMenuWaitMsTotal: number;
+    streamFocusNode: string | null;
+    deferredCompletions: Array<{ nodeName: string; displayName: string; duration: string; hasOutput: boolean }>;
+  }
+
+  const tracker: ParallelTracker = {
+    activeNodes: new Map(),
+    completedNodes: new Set(),
+    lastState: null,
+    isWaitingForInteraction: false,
+    parallelCompletionSummaries: new Map(),
+    interactiveWaitMs: new Map(),
+    postMenuWaitMsTotal: 0,
+    streamFocusNode: null,
+    deferredCompletions: []
+  };
+
+  const originalLog = console.log.bind(console);
+  const deferredLogs: Array<any[]> = [];
+  const shouldBufferLog = (args: any[]): boolean => {
+    if (tracker.streamFocusNode !== STREAM_FOCUS_NODE) return false;
+    if (args.length === 0) return false;
+    const first = String(args[0]);
+    return DEFERRED_LOG_PREFIXES.some(prefix => first.startsWith(prefix));
+  };
+  console.log = (...args: any[]) => {
+    if (shouldBufferLog(args)) {
+      deferredLogs.push(args);
+      return;
+    }
+    originalLog(...args);
+  };
+
+  const timingSummaries: TimingSummary[] = [];
+  let workflowStartTime: number = Date.now();
+
   try {
     // 使用 streamEvents 而不是 stream，以获得节点生命周期事件
     // 这允许我们检测并行执行（on_chain_start）和完成时间
@@ -292,31 +513,6 @@ export async function main() {
       useEventsMode = false;
     }
 
-    // 并行执行追踪器
-    interface ParallelTracker {
-      activeNodes: Map<string, number>;  // nodeName → startTime
-      completedNodes: Set<string>;
-      lastState: ArticleState | null;
-      isWaitingForInteraction: boolean;  // 是否正在等待交互节点完成
-      parallelCompletionSummaries: Map<string, { displayName: string; duration: string }>;  // 并行节点摘要收集
-      interactiveWaitMs: Map<string, number>;
-      postMenuWaitMsTotal: number;
-    }
-
-    const tracker: ParallelTracker = {
-      activeNodes: new Map(),
-      completedNodes: new Set(),
-      lastState: null,
-      isWaitingForInteraction: false,
-      parallelCompletionSummaries: new Map(),
-      interactiveWaitMs: new Map(),
-      postMenuWaitMsTotal: 0
-    };
-
-    // 耗时汇总收集
-    const timingSummaries: TimingSummary[] = [];
-    let workflowStartTime: number = Date.now();
-
     // 用户节点列表（用于过滤内部事件）
     const USER_NODES = new Set([
       "gate_a_select_wechat", "gate_a_select_model", "02_research", "03_rag", "04_titles",
@@ -336,6 +532,14 @@ export async function main() {
         const ev = event as { event: string; name: string; data?: { output?: unknown } };
         eventType = ev.event;
         nodeName = ev.name;
+        // 调试：打印事件详情
+        if (process.env.DEBUG_TIME && timingSummaries.length < 30) {
+          const dataKeys = ev.data ? Object.keys(ev.data).join(', ') : 'none';
+          console.log(`[DEBUG] Event: ${eventType}, Name: ${nodeName}, Data keys: ${dataKeys}`);
+          if (ev.data && typeof ev.data === 'object') {
+            console.log(`[DEBUG] Event data:`, JSON.stringify(ev.data).substring(0, 200));
+          }
+        }
         if (eventType === "on_chain_end" && ev.data?.output) {
           stateUpdate = ev.data.output as Partial<ArticleState>;
         }
@@ -351,18 +555,38 @@ export async function main() {
       }
 
       // 跳过内部事件（如 __start__, __end__, ChannelWrite 等）
-      if (!nodeName || nodeName.startsWith("__")) continue;
+      // ChannelWrite 是 LangGraph 内部通道写入事件，不是实际的节点执行
+      if (!nodeName) continue;
+      if (nodeName === "__end__") {
+        // 流结束事件，退出循环
+        break;
+      }
+      if (nodeName.startsWith("__")) continue;
+      if (nodeName.startsWith("ChannelWrite")) continue;
       if (!USER_NODES.has(nodeName)) continue;
 
       // 节点启动事件 - 检测并行执行
       if (eventType === "on_chain_start") {
+        // 调试：记录所有启动的节点
+        if (process.env.DEBUG_TIME) {
+          console.log(`[DEBUG] on_chain_start: ${nodeName}`);
+        }
+
         // 如果是交互节点启动，标记正在等待交互
         if (NODE_INFO[nodeName]?.isInteractive) {
           tracker.isWaitingForInteraction = true;
         }
 
+        if (nodeName === STREAM_FOCUS_NODE) {
+          tracker.streamFocusNode = nodeName;
+        }
+
+        const shouldDeferOutput = tracker.streamFocusNode === STREAM_FOCUS_NODE &&
+          DEFERRED_NODES_DURING_STREAM.has(nodeName);
+
         // 如果正在等待交互，不显示后台节点的启动信息
-        if (tracker.isWaitingForInteraction && !NODE_INFO[nodeName]?.isInteractive) {
+        // 或者当前处于流式输出窗口，抑制后台节点的启动提示
+        if ((tracker.isWaitingForInteraction && !NODE_INFO[nodeName]?.isInteractive) || shouldDeferOutput) {
           tracker.activeNodes.set(nodeName, Date.now());
           continue;
         }
@@ -397,15 +621,36 @@ export async function main() {
 
       // 节点完成事件
       if (eventType === "on_chain_end") {
-        const startTime = tracker.activeNodes.get(nodeName) || Date.now();
         const endTime = Date.now();
-        let durationMs = endTime - startTime;
-        let interactionWaitMs = 0;
+        const startTime = tracker.activeNodes.get(nodeName);
         tracker.activeNodes.delete(nodeName);
+
+        // 调试：记录未匹配的节点
+        if (!startTime && process.env.DEBUG_TIME) {
+          console.log(`[DEBUG] No startTime found for node: ${nodeName}, activeNodes were:`, Array.from(tracker.activeNodes.keys()));
+        }
+
+        let durationMs: number;
+        if (startTime) {
+          durationMs = endTime - startTime;
+        } else {
+          // 恢复执行时 activeNodes 为空，或数据缺失
+          // 尝试从事件元数据获取，或使用 0（避免错误的负数）
+          durationMs = 0;
+        }
+
+        // 优先使用节点自己记录的执行时间（更准确）
+        const nodeExecutionTime = stateUpdate?.decisions?.timings?.[nodeName];
+        if (nodeExecutionTime && typeof nodeExecutionTime === "number") {
+          durationMs = nodeExecutionTime;
+        }
+        let interactionWaitMs = 0;
         tracker.completedNodes.add(nodeName);
 
         const nodeInfo = NODE_INFO[nodeName];
         const displayName = nodeInfo?.name || nodeName;
+        const shouldDeferOutput = tracker.streamFocusNode === STREAM_FOCUS_NODE &&
+          DEFERRED_NODES_DURING_STREAM.has(nodeName);
 
         if (nodeInfo?.isInteractive) {
           const waitMsFromUpdate = stateUpdate?.decisions?.timings?.[nodeName];
@@ -430,7 +675,7 @@ export async function main() {
             nodeName,
             displayName,
             duration: durationMs,
-            startTime
+            startTime: startTime || 0
           });
         }
 
@@ -447,17 +692,24 @@ export async function main() {
         if (nodeInfo?.isInteractive) {
           tracker.isWaitingForInteraction = false;
           console.log(chalk.dim(`✓ ${displayName} (${duration}s)`));
-        } else if (!tracker.isWaitingForInteraction) {
+        } else if (!tracker.isWaitingForInteraction && !shouldDeferOutput) {
           // 非交互节点，且不在等待交互中，才显示完成信息
           if (nodeInfo?.hasOutput) {
             console.log(chalk.green(`✅ ${displayName} (${duration}s)`));
           } else {
             console.log(chalk.dim(`✓ ${displayName} (${duration}s)`));
           }
+        } else if (shouldDeferOutput) {
+          tracker.deferredCompletions.push({
+            nodeName,
+            displayName,
+            duration,
+            hasOutput: Boolean(nodeInfo?.hasOutput)
+          });
         }
 
         // 如果还有活跃节点，显示剩余进度（但不在等待交互时）
-        if (tracker.activeNodes.size > 0 && !tracker.isWaitingForInteraction) {
+        if (tracker.activeNodes.size > 0 && !tracker.isWaitingForInteraction && !tracker.streamFocusNode) {
           const remaining = Array.from(tracker.activeNodes.keys())
             .map(n => NODE_INFO[n]?.name || n);
           console.log(chalk.dim(`   ⏳ 进行中: ${remaining.join(", ")}`));
@@ -468,7 +720,7 @@ export async function main() {
         const wasParallelExecution = tracker.parallelCompletionSummaries.size > 0 ||
           (tracker.activeNodes.size + 1 > 1);
 
-        if (nodeInfo?.hasOutput && tracker.lastState && !tracker.isWaitingForInteraction) {
+        if (nodeInfo?.hasOutput && tracker.lastState && !tracker.isWaitingForInteraction && !shouldDeferOutput) {
           if (wasParallelExecution) {
             // 并行节点：收集摘要
             tracker.parallelCompletionSummaries.set(nodeName, {
@@ -488,6 +740,27 @@ export async function main() {
           }
           // 非并行节点：不自动显示输出预览（用户可通过 'v' 查看）
         }
+
+        if (nodeName === STREAM_FOCUS_NODE) {
+          tracker.streamFocusNode = null;
+          if (tracker.deferredCompletions.length > 0) {
+            const completions = tracker.deferredCompletions.splice(0);
+            for (const item of completions) {
+              const line = `${item.displayName} (${item.duration}s)`;
+              if (item.hasOutput) {
+                console.log(chalk.green(`✅ ${line}`));
+              } else {
+                console.log(chalk.dim(`✓ ${line}`));
+              }
+            }
+          }
+          if (deferredLogs.length > 0) {
+            const logs = deferredLogs.splice(0);
+            for (const args of logs) {
+              originalLog(...args);
+            }
+          }
+        }
       }
 
       // 交互节点：等待用户输入
@@ -500,10 +773,7 @@ export async function main() {
         const action = await showUserMenu();
 
         if (action === "quit") {
-          console.log(chalk.yellow("\n⏸️ 流程已暂停"));
-          console.log(chalk.gray(`使用 --resume 可从当前状态继续\n`));
-          console.log(chalk.gray(`Thread ID: ${threadId}\n`));
-          process.exit(0);
+          await exitWithSummary(threadId, timingSummaries, workflowStartTime, 0, false);
         } else if (action === "view" && tracker.lastState) {
           await showFullOutput(nodeName, tracker.lastState);
         }
@@ -527,15 +797,29 @@ export async function main() {
       console.log(chalk.gray(`  状态: ${tracker.lastState.status || "完成"}\n`));
     }
 
-    const interactiveWaitMsTotal = Array.from(tracker.interactiveWaitMs.values())
-      .reduce((sum, value) => sum + value, 0);
-    const totalWaitMs = interactiveWaitMsTotal + tracker.postMenuWaitMsTotal;
+    const totalWaitMs = 0; // 不再使用，computeDuration 现在从 summaries 直接计算
     showTimingDashboard(timingSummaries, workflowStartTime, totalWaitMs, threadId);
 
   } catch (error) {
     spinner.fail("执行失败");
-    console.error(chalk.red("错误:"), error);
-    process.exit(1);
+
+    // 记录失败节点的部分耗时
+    // 即使节点失败，也花费了时间（可能在等待 API 响应）
+    for (const [nodeName, startTime] of tracker.activeNodes.entries()) {
+      const durationMs = Date.now() - startTime;
+      const nodeInfo = NODE_INFO[nodeName];
+      if (nodeInfo) {
+        timingSummaries.push({
+          nodeName,
+          displayName: nodeInfo.name || nodeName,
+          duration: durationMs,
+          startTime
+        });
+      }
+    }
+
+    const totalWaitMs = 0;
+    await handleNodeError(error, threadId, timingSummaries, workflowStartTime, totalWaitMs, { prompt });
   }
 }
 

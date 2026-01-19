@@ -228,12 +228,13 @@ models:
         temperature: 0.3  # 降低随机性，确保重生成时结果一致
       timeout: 60  # seconds
 
-    # 图片提示词生成节点（使用 deepseek-chat，非流式输出）
+    # 图片提示词生成节点（并行节点，抑制流式输出）
     image_prompt:
       provider: deepseek
       model: deepseek-chat
       base_url: https://api.deepseek.com
       api_key_env: DEEPSEEK_API_KEY
+      suppress_streaming: true  # 抑制流式输出（与 humanize 并行时）
       params:
         max_tokens: 2048
         temperature: 0.7

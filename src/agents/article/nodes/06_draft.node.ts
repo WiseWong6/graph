@@ -58,6 +58,15 @@ interface ParsedRAG {
  * @returns 更新的状态
  */
 export async function draftNode(state: ArticleState): Promise<Partial<ArticleState>> {
+  const startTime = Date.now();
+
+  // 新增：打印 state.decisions 诊断状态
+  console.log("[05_draft] State check:", {
+    hasDecisions: !!state.decisions,
+    selectedModel: state.decisions?.selectedModel,
+    allDecisionKeys: state.decisions ? Object.keys(state.decisions) : []
+  });
+
   // ========== 获取标题 ==========
   const title = state.decisions?.selectedTitle;
 
@@ -119,9 +128,19 @@ export async function draftNode(state: ArticleState): Promise<Partial<ArticleSta
     writeFileSync(draftPath, draft, "utf-8");
     console.log("[05_draft] Saved draft:", draftPath);
 
+    const executionTime = Date.now() - startTime;
+    console.log(`[05_draft] Complete in ${(executionTime / 1000).toFixed(2)}s`);
+
     return {
       draft,
-      outputPath
+      outputPath,
+      decisions: {
+        ...state.decisions,
+        timings: {
+          ...state.decisions?.timings,
+          "06_draft": executionTime
+        }
+      }
     };
   } catch (error) {
     console.error(`[05_draft] Failed to generate draft: ${error}`);

@@ -15,6 +15,7 @@ export interface LLMNodeConfig {
   temperature?: number;
   timeout?: number;
   stream?: boolean;
+  suppress_streaming?: boolean;  // 抑制流式输出（并行节点用）
   thinking?: Record<string, unknown>;
 }
 
@@ -171,13 +172,19 @@ export function getModelConfig(modelId: string): AvailableModel | undefined {
 export function getDynamicLLMConfig(selectedModelId: string | undefined, nodeId: string): LLMNodeConfig {
   const nodeConfig = getNodeLLMConfig(nodeId);
 
+  // 新增：打印输入参数（所有节点都会打印）
+  console.log(`[LLMConfig] [${nodeId}] getDynamicLLMConfig called:`, {
+    selectedModelId,
+    nodeDefault: `${nodeConfig.provider}/${nodeConfig.model}`
+  });
+
   // 如果用户选择了模型
   if (selectedModelId) {
     const modelConfig = getModelConfig(selectedModelId);
     if (modelConfig) {
       // 获取 provider 配置
       const providerConfig = getProviderConfig(modelConfig.provider);
-      return {
+      const result = {
         ...nodeConfig,
         provider: modelConfig.provider,
         model: modelConfig.model,
@@ -186,8 +193,19 @@ export function getDynamicLLMConfig(selectedModelId: string | undefined, nodeId:
         stream: providerConfig?.stream ?? nodeConfig.stream,
         thinking: providerConfig?.thinking ?? nodeConfig.thinking
       };
+
+      // 新增：打印成功匹配
+      console.log(`[LLMConfig] [${nodeId}] Using user-selected model:`, {
+        selected: selectedModelId,
+        actual: `${result.provider}/${result.model}`
+      });
+
+      return result;
     }
-    console.warn(`[LLMConfig] Model ${selectedModelId} not found, falling back to node ${nodeId} config`);
+    console.warn(`[LLMConfig] [${nodeId}] Model ${selectedModelId} not found, falling back to node default`);
+  } else {
+    // 新增：打印降级原因
+    console.log(`[LLMConfig] [${nodeId}] No user-selected model provided, using node default`);
   }
 
   // 降级到节点默认配置

@@ -8,6 +8,66 @@ import OpenAI from "openai";
 import type { LLMNodeConfig } from "../config/llm.js";
 
 /**
+ * 输出协调器 - 管理并行节点的输出顺序
+ * 确保被抑制输出的节点等待主动输出节点完成后再输出
+ */
+class OutputCoordinator {
+  private activeStreamCount = 0;  // 正在流式输出的节点数
+  private deferredOutputs: Array<() => void> = [];  // 延迟的输出函数
+
+  /**
+   * 开始流式输出（节点开始流式输出时调用）
+   */
+  beginStream(): void {
+    this.activeStreamCount++;
+  }
+
+  /**
+   * 结束流式输出（节点完成流式输出时调用）
+   * 如果有延迟的输出，会在此时执行
+   */
+  endStream(): void {
+    this.activeStreamCount--;
+    if (this.activeStreamCount <= 0) {
+      this.activeStreamCount = 0;
+      // 执行所有延迟的输出
+      const deferred = this.deferredOutputs.splice(0);
+      deferred.forEach(fn => fn());
+    }
+  }
+
+  /**
+   * 检查是否有节点正在进行流式输出
+   */
+  hasActiveStream(): boolean {
+    return this.activeStreamCount > 0;
+  }
+
+  /**
+   * 延迟输出（当有活跃流式输出时）
+   * @param outputFn - 输出函数
+   * @returns 是否已延迟（true）或已执行（false）
+   */
+  defer(outputFn: () => void): boolean {
+    if (this.hasActiveStream()) {
+      this.deferredOutputs.push(outputFn);
+      return true;  // 已延迟
+    }
+    return false;  // 未延迟，可以执行
+  }
+
+  /**
+   * 立即执行输出（不延迟）
+   */
+  executeNow(outputFn: () => void): void {
+    outputFn();
+  }
+}
+
+// 全局输出协调器
+const outputCoordinator = new OutputCoordinator();
+
+/**
  * Simple async mutex to prevent concurrent stdout writes
  * Ensures streaming output from parallel nodes doesn't interleave
  */
@@ -33,6 +93,9 @@ class AsyncMutex {
 // Module-level mutex for all stdout operations
 const stdoutMutex = new AsyncMutex();
 
+// 导出输出协调器供节点使用
+export { outputCoordinator };
+
 // DeepSeek-specific response extensions
 // The DeepSeek Reasoner model returns reasoning_content and reasoning_tokens
 interface DeepSeekCompletionMessage extends OpenAI.ChatCompletionMessage {
@@ -50,6 +113,7 @@ export interface LLMCallOptions {
   maxTokens?: number;
   temperature?: number;
   stream?: boolean;
+  suppressStreaming?: boolean;  // 抑制流式输出（并行节点用）
 }
 
 // Unified LLM response - normalized output
@@ -205,14 +269,27 @@ export class LLMClient {
     }
     messages.push({ role: "user", content: options.prompt });
 
+    // 合并配置的 stream 值（配置优先，然后才是 options.stream）
+    const effectiveStream = this.config.stream !== undefined ? this.config.stream : options.stream;
+
     // DeepSeek Reasoner 使用流式输出（仅 reasoner 模型）
     const isDeepSeekReasoner = this.config.provider === "deepseek" && this.config.model.includes("reasoner");
 
     // Doubao 深度思考模型也使用流式输出（thinking.type !== "disabled"）
     const isDoubaoThinking = this.config.provider === "doubao" && this.config.thinking?.type !== "disabled";
 
-    if (isDeepSeekReasoner || isDoubaoThinking) {
-      return await this.callDeepSeekStreaming(client, messages, options);
+    // 检查是否强制关闭流式输出
+    const forceNonStreaming = effectiveStream === false;
+
+    // 合并 suppress_streaming 配置（用于并行节点抑制流式输出）
+    const effectiveSuppressStreaming = this.config.suppress_streaming || options.suppressStreaming;
+
+    if ((isDeepSeekReasoner || isDoubaoThinking) && !forceNonStreaming) {
+      // 将 suppress_streaming 配置传递给流式调用
+      return await this.callDeepSeekStreaming(client, messages, {
+        ...options,
+        suppressStreaming: effectiveSuppressStreaming
+      });
     }
 
     const completion = await client.chat.completions.create({
@@ -246,6 +323,7 @@ export class LLMClient {
    * 支持返回 reasoning_content 字段的模型
    * 逐字显示思考过程和最终内容
    * 使用互斥锁防止并行执行时输出交错
+   * 支持 suppressStreaming 选项抑制流式输出（并行节点用）
    */
   private async callDeepSeekStreaming(
     client: OpenAI,
@@ -274,51 +352,69 @@ export class LLMClient {
     const isDeepSeek = this.config.provider === "deepseek";
     const providerName = isDeepSeek ? "DeepSeek" : "Doubao";
 
+    // 检查是否抑制流式输出（并行节点用）
+    const suppressOutput = options.suppressStreaming;
+
     let reasoningContent = "";
     let responseContent = "";
     let inReasoning = false;
 
-    console.log(`[LLMClient] 💭 ${providerName} Thinking:`);
-
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta as any; // DeepSeek/Doubao 特有字段
-
-      // 处理推理内容（思考过程）
-      if (delta?.reasoning_content) {
-        const text = delta.reasoning_content;
-        reasoningContent += text;
-        // 使用互斥锁保护 stdout，防止并行输出交错
-        const release = await stdoutMutex.acquire();
-        try {
-          process.stdout.write(text);
-        } finally {
-          release();
-        }
-        inReasoning = true;
-      }
-
-      // 处理响应内容（最终回答）
-      if (delta?.content) {
-        if (inReasoning) {
-          console.log(); // 思考结束，换行
-          console.log(`[LLMClient] ✍️  ${providerName} Response:`);
-          inReasoning = false;
-        }
-        const text = delta.content;
-        responseContent += text;
-        // 使用互斥锁保护 stdout，防止并行输出交错
-        const release = await stdoutMutex.acquire();
-        try {
-          process.stdout.write(text);
-        } finally {
-          release();
-        }
-      }
+    // 如果不抑制输出，通知输出协调器开始流式输出
+    if (!suppressOutput) {
+      outputCoordinator.beginStream();
+      console.log(`[LLMClient] 💭 ${providerName} Thinking:`);
     }
 
-    // 确保换行（如果输出了内容）
-    if (inReasoning || responseContent.length > 0) {
-      console.log();
+    try {
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta as any; // DeepSeek/Doubao 特有字段
+
+        // 处理推理内容（思考过程）
+        if (delta?.reasoning_content) {
+          const text = delta.reasoning_content;
+          reasoningContent += text;
+          // 仅在不抑制输出时写入 stdout
+          if (!suppressOutput) {
+            const release = await stdoutMutex.acquire();
+            try {
+              process.stdout.write(text);
+            } finally {
+              release();
+            }
+          }
+          inReasoning = true;
+        }
+
+        // 处理响应内容（最终回答）
+        if (delta?.content) {
+          if (inReasoning && !suppressOutput) {
+            console.log(); // 思考结束，换行
+            console.log(`[LLMClient] ✍️  ${providerName} Response:`);
+            inReasoning = false;
+          }
+          const text = delta.content;
+          responseContent += text;
+          // 仅在不抑制输出时写入 stdout
+          if (!suppressOutput) {
+            const release = await stdoutMutex.acquire();
+            try {
+              process.stdout.write(text);
+            } finally {
+              release();
+            }
+          }
+        }
+      }
+
+      // 确保换行（如果输出了内容）
+      if (!suppressOutput && (inReasoning || responseContent.length > 0)) {
+        console.log();
+      }
+    } finally {
+      // 如果不抑制输出，通知输出协调器结束流式输出
+      if (!suppressOutput) {
+        outputCoordinator.endStream();
+      }
     }
 
     // 确保输出完全刷新

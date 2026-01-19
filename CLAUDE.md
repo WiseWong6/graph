@@ -51,11 +51,7 @@
   - LLM Token 使用量（prompt/completion/total）
   - 内存使用监控
   - 错误统计
-- **Timing Dashboard** (`src/cli/step-cli.ts`): 可视化耗时面板
-  - 总耗时 vs 计算耗时（排除等待时间）
-  - 每节点耗时条形图
-  - 并行执行检测与显示
-- **自动排除交互等待**: 交互节点的时间统计自动扣除用户输入时间
+- **Timing Dashboard** (`src/cli/step-cli.ts`): 仅输出总耗时（不再展示节点/compute 统计）
 
 ### 回滚与恢复
 - **ResumeManager** (`src/cli/resume-manager.ts`): 基于 LangGraph checkpoint 的恢复管理器
@@ -110,7 +106,7 @@
 ### Images 流程 (10-12)
 - **Prompts (10)**: 5 种风格（infographic/healing/pixar/sokamono/handdrawn）
 - **Images (11)**: Ark API 生图 + 并行生成 + 水印关闭
-- **Upload (12)**: 微信 CDN 并行上传（图文消息图片）
+- **Upload (12)**: 微信 CDN 并行上传（图文消息图片）+ 回退机制（wechat 配置缺失时自动提示选择）
 
 ### Wait For Upload 节点 (13)
 - 并行同步点
@@ -155,7 +151,13 @@
 
 ## 变更日志
 
-### 2026-01-19
+### 2026-01-19 (晚)
+- **Upload 节点回退机制**: 恢复会话时 wechat 配置缺失自动提示选择
+  - 解决 `--resume` 恢复时 state.decisions.wechat 丢失问题
+  - 添加 `promptForWechat()` 回退函数
+  - 配置自动保存到 state，下次恢复不会丢失
+
+### 2026-01-19 (早)
 - **修复并行汇聚时序**: 14_html 使用 join 边等待 12_upload + 09_humanize 完成
 - **标题选择 join**: gate_c_select_title 使用 join 边等待 03_rag + 04_titles
 - **HTML 节点验收通过**: markdown-it 解析 + 图片替换（需回归 join 修复）
@@ -167,6 +169,10 @@
   - thumb_media_id 必填（上传永久素材）
   - 摘要长度限制 54 个汉字
 - **所有 16 个节点验收通过** ✅（含 wait_for_upload）
+- **Resume 列表时间修复**: 时间来自 checkpoint `ts`，显示"今晚/昨天/前天/日期"
+- **Resume 节点显示优化**: checkpoint 列表改用下一节点并屏蔽 loop 噪音
+- **Step CLI 输出优化**: humanize 流式期间缓冲 10/11/12 输出，完成后统一展示
+- **耗时面板精简**: 仅保留总耗时
 
 ### 2026-01-18
 - **ResumeManager**: 恢复界面显示节点名称
@@ -230,7 +236,7 @@ write-agent/
 │   │       ├── 09_humanize.node.ts       ✅
 │   │       ├── 10_prompts.node.ts        ✅
 │   │       ├── 11_images.node.ts         ✅
-│   │       ├── 12_upload.node.ts         ✅ (stable token)
+│   │       ├── 12_upload.node.ts         ✅ (stable token + 回退机制)
 │   │       ├── 13_wait_for_upload.node.ts ✅ (并行同步点)
 │   │       ├── 14_html.node.ts           ✅
 │   │       └── 15_draftbox.node.ts       ✅ (永久素材)

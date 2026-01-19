@@ -16,6 +16,7 @@
 
 import { ArticleState, ImageStyle } from "../state";
 import { callLLMWithFallback } from "../../../utils/llm-runner.js";
+import { outputCoordinator } from "../../../utils/llm-client.js";
 import { config } from "dotenv";
 import { resolve } from "path";
 
@@ -95,39 +96,53 @@ export async function promptsNode(state: ArticleState): Promise<Partial<ArticleS
       { prompt, systemMessage: PROMPT_SYSTEM_MESSAGE }
     );
 
-    console.log("[10_prompts] LLM model:", config.model);
-    console.log("[10_prompts] Prompts generated");
+    // 延迟输出完成日志，等待并行节点完成
+    outputCoordinator.defer(() => {
+      console.log("[10_prompts] LLM model:", config.model);
+      console.log("[10_prompts] Prompts generated");
+    });
 
     // ========== 解析提示词 ==========
     // 添加原始响应日志（用于调试）
-    console.log("[10_prompts] LLM raw response (first 500 chars):", response.text.substring(0, 500));
+    outputCoordinator.defer(() => {
+      console.log("[10_prompts] LLM raw response (first 500 chars):", response.text.substring(0, 500));
+    });
 
     const prompts = parsePrompts(response.text);
 
     // 验证解析结果，如果没有解析到任何提示词，使用降级方案
     if (prompts.length === 0) {
-      console.warn("[10_prompts] No prompts parsed from LLM response, using fallback");
+      outputCoordinator.defer(() => {
+        console.warn("[10_prompts] No prompts parsed from LLM response, using fallback");
+      });
       const fallbackPrompts = generateFallbackPrompts(count, style);
       return { imagePrompts: fallbackPrompts };
     }
 
     const promptStrings = prompts.map(p => p.prompt);
 
-    console.log(`[10_prompts] Generated ${promptStrings.length} prompts:`);
-    prompts.forEach((p, i) => {
-      console.log(`  ${i + 1}. ${p.paragraph_summary}`);
-      console.log(`     ${p.prompt.substring(0, 80)}...`);
+    // 延迟输出结果，等待并行节点完成
+    outputCoordinator.defer(() => {
+      console.log(`[10_prompts] Generated ${promptStrings.length} prompts:`);
+      prompts.forEach((p, i) => {
+        console.log(`  ${i + 1}. ${p.paragraph_summary}`);
+        console.log(`     ${p.prompt.substring(0, 80)}...`);
+      });
     });
 
     return {
       imagePrompts: promptStrings
     };
   } catch (error) {
-    console.error(`[10_prompts] Failed to generate prompts: ${error}`);
+    outputCoordinator.defer(() => {
+      console.error(`[10_prompts] Failed to generate prompts: ${error}`);
+    });
 
     // 降级: 返回风格化通用提示词
     const fallbackPrompts = generateFallbackPrompts(count, style);
-    console.log("[10_prompts] Using fallback prompts");
+    outputCoordinator.defer(() => {
+      console.log("[10_prompts] Using fallback prompts");
+    });
 
     return {
       imagePrompts: fallbackPrompts

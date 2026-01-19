@@ -23,7 +23,10 @@ const INDICES_DIR = join(process.cwd(), ".index");
 
 // 全局设置嵌入模型 - 使用本地模型路径
 Settings.embedModel = new HuggingFaceEmbedding({
-  modelType: resolve(process.cwd(), "local_models")  // 强制使用本地模型
+  modelType: resolve(process.cwd(), "local_models"),  // 强制使用本地模型
+  modelOptions: {
+    dtype: "fp32"
+  }
 });
 
 /**
