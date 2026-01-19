@@ -16,9 +16,9 @@ Write Agent 是一个基于 LangGraph.js 的多代理内容生成系统，采用
   - `04_titles.node.ts` - 标题生成
   - `05_select_title.node.ts` - 交互式标题选择
   - `06_draft.node.ts` - 初稿生成（RAG 增强）
-  - `07_rewrite.node.ts` - **智性叙事重写**
+  - `07_rewrite.node.ts` - 智性叙事重写（Kimi K2）
   - `08_confirm.node.ts` - 交互式图片配置确认
-  - `09_humanize.node.ts` - **先 LLM 重写（风格优化），再代码清洗（确定性规则）**
+  - **09_humanize.node.ts** - **先 LLM 重写（Kimi K2），再代码清洗（确定性规则）**
   - `10_prompts.node.ts` - 图片提示词生成（基于初稿）
   - `11_images.node.ts` - 图片生成（Ark API）
   - `12_upload.node.ts` - 图片上传到微信 CDN

@@ -69,14 +69,14 @@ nodes:
         temperature: 0.5
       timeout: 120
   rewrite:
-    model: deepseek-reasoner
+    model: kimi-k2-thinking-251104
     overrides:
       params:
         max_tokens: 8192
         temperature: 0.75
       timeout: 180
   humanize:
-    model: deepseek-reasoner
+    model: kimi-k2-thinking-251104
     overrides:
       params:
         max_tokens: 8192
