@@ -135,37 +135,72 @@ async function promptForTopic(): Promise<string> {
   });
 }
 
-/**
- * 显示耗时统计汇总
- */
-function showTimingSummary(summaries: TimingSummary[], workflowStartTime: number): void {
+function renderDashboardLine(content: string, width: number): string {
+  const innerWidth = width - 2;
+  const safe = content.length > innerWidth
+    ? content.slice(0, innerWidth)
+    : content.padEnd(innerWidth, " ");
+  return `|${safe}|`;
+}
+
+function renderSeparator(width: number, title?: string): string {
+  if (!title) {
+    return `+${"-".repeat(width - 2)}+`;
+  }
+  const innerWidth = width - 2;
+  const paddedTitle = ` ${title} `;
+  const remaining = innerWidth - paddedTitle.length;
+  const left = Math.max(0, Math.floor(remaining / 2));
+  const right = Math.max(0, remaining - left);
+  return `+${"-".repeat(left)}${paddedTitle}${"-".repeat(right)}+`;
+}
+
+function showTimingDashboard(
+  summaries: TimingSummary[],
+  workflowStartTime: number,
+  totalWaitMs: number,
+  threadId: string
+): void {
   const totalDuration = Date.now() - workflowStartTime;
+  const computeDuration = Math.max(0, totalDuration - totalWaitMs);
+  const width = 78;
 
-  console.log("\n" + "═".repeat(60));
-  console.log(chalk.cyan.bold("⏱️  耗时统计"));
-  console.log("═".repeat(60));
-
-  // 端到端总耗时
-  console.log(chalk.bold(`\n总耗时: ${(totalDuration / 1000).toFixed(1)}s\n`));
+  console.log("");
+  console.log(renderSeparator(width, "TASK TIME DASHBOARD"));
+  console.log(renderDashboardLine(`Run: ${threadId}  Mode: step`, width));
+  console.log(renderDashboardLine(
+    `Total (wall): ${(totalDuration / 1000).toFixed(1)}s  ` +
+    `Wait excluded: ${(totalWaitMs / 1000).toFixed(1)}s  ` +
+    `Compute: ${(computeDuration / 1000).toFixed(1)}s`,
+    width
+  ));
 
   if (summaries.length === 0) {
-    console.log(chalk.gray("无节点耗时数据"));
-    console.log("═".repeat(60) + "\n");
+    console.log(renderSeparator(width, "Nodes (compute)"));
+    console.log(renderDashboardLine("No node timing data.", width));
+    console.log(renderSeparator(width));
     return;
   }
 
-  // 节点耗时排名（从慢到快）
-  const sorted = [...summaries].sort((a, b) => b.duration - a.duration);
+  console.log(renderSeparator(width, "Nodes (compute)"));
 
-  console.log("节点耗时排名:");
-  sorted.forEach((t, i) => {
-    const duration = (t.duration / 1000).toFixed(1);
-    const barLength = Math.min(Math.floor(t.duration / 1000), 20);
-    const bar = chalk.cyan("█".repeat(barLength));
-    console.log(`  ${i + 1}. ${chalk.white(t.displayName.padEnd(12))} ${chalk.yellow(duration.padStart(6))}s ${bar}`);
-  });
+  const ordered = [...summaries].sort((a, b) => a.startTime - b.startTime);
+  const maxDuration = Math.max(...ordered.map(item => item.duration), 1);
+  const labelWidth = 16;
+  const durationWidth = 7;
+  const innerWidth = width - 2;
 
-  console.log("\n" + "═".repeat(60));
+  for (const item of ordered) {
+    const label = item.displayName.padEnd(labelWidth, " ");
+    const durationText = `${(item.duration / 1000).toFixed(1)}s`.padStart(durationWidth, " ");
+    const prefix = `${label} ${durationText} |`;
+    const barWidth = Math.max(4, innerWidth - prefix.length);
+    const barLength = Math.max(1, Math.round((item.duration / maxDuration) * barWidth));
+    const bar = "#".repeat(barLength).padEnd(barWidth, " ");
+    console.log(renderDashboardLine(prefix + bar, width));
+  }
+
+  console.log(renderSeparator(width));
 }
 
 /**
@@ -262,6 +297,8 @@ export async function main() {
       lastState: ArticleState | null;
       isWaitingForInteraction: boolean;  // 是否正在等待交互节点完成
       parallelCompletionSummaries: Map<string, { displayName: string; duration: string }>;  // 并行节点摘要收集
+      interactiveWaitMs: Map<string, number>;
+      postMenuWaitMsTotal: number;
     }
 
     const tracker: ParallelTracker = {
@@ -269,7 +306,9 @@ export async function main() {
       completedNodes: new Set(),
       lastState: null,
       isWaitingForInteraction: false,
-      parallelCompletionSummaries: new Map()
+      parallelCompletionSummaries: new Map(),
+      interactiveWaitMs: new Map(),
+      postMenuWaitMsTotal: 0
     };
 
     // 耗时汇总收集
@@ -358,13 +397,30 @@ export async function main() {
       if (eventType === "on_chain_end") {
         const startTime = tracker.activeNodes.get(nodeName) || Date.now();
         const endTime = Date.now();
-        const durationMs = endTime - startTime;
-        const duration = (durationMs / 1000).toFixed(1);
+        let durationMs = endTime - startTime;
+        let interactionWaitMs = 0;
         tracker.activeNodes.delete(nodeName);
         tracker.completedNodes.add(nodeName);
 
         const nodeInfo = NODE_INFO[nodeName];
         const displayName = nodeInfo?.name || nodeName;
+
+        if (nodeInfo?.isInteractive) {
+          const waitMsFromUpdate = stateUpdate?.decisions?.timings?.[nodeName];
+          const waitMsFromState = tracker.lastState?.decisions?.timings?.[nodeName];
+          interactionWaitMs = typeof waitMsFromUpdate === "number"
+            ? waitMsFromUpdate
+            : typeof waitMsFromState === "number"
+              ? waitMsFromState
+              : 0;
+          if (interactionWaitMs > 0) {
+            const previous = tracker.interactiveWaitMs.get(nodeName) || 0;
+            tracker.interactiveWaitMs.set(nodeName, previous + interactionWaitMs);
+            durationMs = Math.max(0, durationMs - interactionWaitMs);
+          }
+        }
+
+        const duration = (durationMs / 1000).toFixed(1);
 
         // 收集耗时数据
         if (nodeInfo) {
@@ -438,6 +494,7 @@ export async function main() {
         await new Promise(resolve => setTimeout(resolve, 100));
 
         // 用户交互
+        const menuWaitStart = Date.now();
         const action = await showUserMenu();
 
         if (action === "quit") {
@@ -448,6 +505,7 @@ export async function main() {
         } else if (action === "view" && tracker.lastState) {
           await showFullOutput(nodeName, tracker.lastState);
         }
+        tracker.postMenuWaitMsTotal += Date.now() - menuWaitStart;
       } else if (eventType === "on_chain_end") {
         // 非交互式节点：短暂延迟后继续
         await new Promise(resolve => setTimeout(resolve, 50));
@@ -467,8 +525,10 @@ export async function main() {
       console.log(chalk.gray(`  状态: ${tracker.lastState.status || "完成"}\n`));
     }
 
-    // 显示耗时统计汇总
-    showTimingSummary(timingSummaries, workflowStartTime);
+    const interactiveWaitMsTotal = Array.from(tracker.interactiveWaitMs.values())
+      .reduce((sum, value) => sum + value, 0);
+    const totalWaitMs = interactiveWaitMsTotal + tracker.postMenuWaitMsTotal;
+    showTimingDashboard(timingSummaries, workflowStartTime, totalWaitMs, threadId);
 
   } catch (error) {
     spinner.fail("执行失败");

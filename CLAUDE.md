@@ -127,6 +127,7 @@
 - **修复并行汇聚时序**: 12_html 使用 join 边等待 11_upload + 08_humanize 完成
 - **标题选择 join**: gate_c_select_title 使用 join 边等待 02_rag + 03_titles
 - **HTML 节点验收通过**: markdown-it 解析 + 图片替换（需回归 join 修复）
+- **Humanize 增强**: 自动恢复加粗标记并补齐缺失图片占位符
 - **Draftbox 节点验收通过**: 永久缩略图素材 + stable token
 - **完整发布流程测试**: `scripts/test-publish-flow.ts`
 - **微信 API 修复**:

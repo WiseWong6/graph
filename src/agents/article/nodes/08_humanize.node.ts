@@ -82,7 +82,18 @@ export async function humanizeNode(state: ArticleState): Promise<Partial<Article
       usage: response.usage
     });
 
-    const humanized = response.text;
+    let humanized = response.text;
+    const boldResult = restoreBoldMarkers(humanized, input);
+    humanized = boldResult.text;
+    if (boldResult.restored > 0) {
+      log.info("Restored bold markers", { restored: boldResult.restored });
+    }
+
+    const imageResult = ensureImagePlaceholders(humanized, imageCount);
+    humanized = imageResult.text;
+    if (imageResult.added > 0) {
+      log.info("Added missing image placeholders", { added: imageResult.added });
+    }
 
     // ========== 保存人化稿 ==========
     log.startStep("save_output");
@@ -143,7 +154,7 @@ ${content}
   prompt += `【输出要求】
 - 只输出处理后的 Markdown
 - 不得输出分析/过程/解释
-- 所有 Markdown 标记必须原样保留且可用`;
+- 所有 Markdown 标记必须原样保留且可用（尤其是标题 # 和加粗 **）`;
 
   return prompt;
 }
@@ -170,7 +181,7 @@ B) **深度去AI化重写**：在**绝对保留 Markdown 标记**前提下，消
 ## 输出要求（Hard Output）
 - **只输出处理后的 Markdown**。
 - **不得输出**任何分析、过程、解释。
-- 所有 Markdown 标记（标题/链接/图片/代码/公式）必须原样保留且可用。
+- 所有 Markdown 标记（标题/加粗/链接/图片/代码/公式）必须原样保留且可用。
 
 ---
 
@@ -252,6 +263,84 @@ B) **深度去AI化重写**：在**绝对保留 Markdown 标记**前提下，消
 ## 现在开始
 请对【输入的Markdown文本】执行阶段A清洗 + 阶段B去AI化润色。
 **只输出最终 Markdown。**`;
+
+function restoreBoldMarkers(
+  output: string,
+  source: string
+): { text: string; restored: number } {
+  const phrases = extractBoldPhrases(source);
+  if (phrases.length === 0) {
+    return { text: output, restored: 0 };
+  }
+
+  let updated = output;
+  let restored = 0;
+
+  for (const phrase of phrases) {
+    const target = `**${phrase}**`;
+    if (updated.includes(target)) {
+      continue;
+    }
+
+    const index = updated.indexOf(phrase);
+    if (index === -1) {
+      continue;
+    }
+
+    updated = updated.replace(phrase, target);
+    restored += 1;
+  }
+
+  return { text: updated, restored };
+}
+
+function extractBoldPhrases(markdown: string): string[] {
+  const withoutCode = markdown
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`[^`]*`/g, "");
+  const matches = Array.from(withoutCode.matchAll(/\*\*(.+?)\*\*/g));
+  const phrases = matches.map(match => match[1]).filter(Boolean);
+
+  return Array.from(new Set(phrases));
+}
+
+function ensureImagePlaceholders(
+  markdown: string,
+  imageCount: number
+): { text: string; added: number } {
+  if (imageCount <= 0) {
+    return { text: markdown, added: 0 };
+  }
+
+  const matches = Array.from(markdown.matchAll(/!\[.*?\]\((\d+)\)/g));
+  const used = new Set<number>();
+  for (const match of matches) {
+    const index = Number.parseInt(match[1], 10);
+    if (!Number.isNaN(index)) {
+      used.add(index);
+    }
+  }
+
+  const missing: number[] = [];
+  for (let i = 0; i < imageCount; i += 1) {
+    if (!used.has(i)) {
+      missing.push(i);
+    }
+  }
+
+  if (missing.length === 0) {
+    return { text: markdown, added: 0 };
+  }
+
+  const suffix = missing
+    .map(index => `![配图${index + 1}](${index})`)
+    .join("\n\n");
+
+  return {
+    text: `${markdown.trimEnd()}\n\n${suffix}\n`,
+    added: missing.length
+  };
+}
 
 /**
  * 获取默认输出路径

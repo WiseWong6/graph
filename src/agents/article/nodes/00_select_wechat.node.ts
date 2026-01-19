@@ -91,6 +91,7 @@ export async function selectWechatNode(
   state: ArticleState
 ): Promise<Partial<ArticleState>> {
   const account = state.decisions?.wechat?.account;
+  const timingKey = "gate_a_select_wechat";
 
   // 已选择，跳过
   if (account) {
@@ -114,6 +115,7 @@ export async function selectWechatNode(
   }
 
   // 第一步：选择公众号
+  const promptTimingStart = Date.now();
   const answer1 = await prompt<{ accountId: string }>([
     {
       type: "list",
@@ -125,6 +127,7 @@ export async function selectWechatNode(
       }))
     }
   ]);
+  const promptTimingMs = Date.now() - promptTimingStart;
 
   const selectedAccount = availableAccounts.find(
     acc => acc.id === answer1.accountId
@@ -139,6 +142,10 @@ export async function selectWechatNode(
   return {
     decisions: {
       ...state.decisions,
+      timings: {
+        ...state.decisions?.timings,
+        [timingKey]: promptTimingMs
+      },
       wechat: {
         account: selectedAccount.id,
         name: selectedAccount.name,

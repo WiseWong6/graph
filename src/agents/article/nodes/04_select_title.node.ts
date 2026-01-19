@@ -67,6 +67,8 @@ export async function selectTitleNode(
   state: ArticleState
 ): Promise<Partial<ArticleState>> {
   const existing = state.decisions?.selectedTitle;
+  const timingKey = "gate_c_select_title";
+  let promptWaitMs = 0;
 
   // 已选择，跳过
   if (existing) {
@@ -105,6 +107,7 @@ export async function selectTitleNode(
   ];
 
   // 第一层选择
+  const selectionStart = Date.now();
   const answer = await prompt<{ action: string }>([
     {
       type: "list",
@@ -113,6 +116,7 @@ export async function selectTitleNode(
       choices
     }
   ]);
+  promptWaitMs += Date.now() - selectionStart;
 
   const selected = answer.action;
 
@@ -122,6 +126,10 @@ export async function selectTitleNode(
     return {
       decisions: {
         ...state.decisions,
+        timings: {
+          ...state.decisions?.timings,
+          [timingKey]: promptWaitMs
+        },
         regenerateTitles: true,
         selectedTitle: undefined  // 清除之前的选择
       },
@@ -133,6 +141,7 @@ export async function selectTitleNode(
   if (selected === "__CUSTOM__") {
     console.log("[select_title] 进入自定义标题模式\n");
 
+    const customStart = Date.now();
     const customAnswer = await prompt<{
       customTitle: string;
       customTitleNote?: string
@@ -149,6 +158,7 @@ export async function selectTitleNode(
         message: "是否有修改想法？（可选，直接回车跳过）:"
       }
     ]);
+    promptWaitMs += Date.now() - customStart;
 
     console.log(`[select_title] 自定义标题: ${customAnswer.customTitle}`);
     if (customAnswer.customTitleNote) {
@@ -159,6 +169,10 @@ export async function selectTitleNode(
     return {
       decisions: {
         ...state.decisions,
+        timings: {
+          ...state.decisions?.timings,
+          [timingKey]: promptWaitMs
+        },
         selectedTitle: customAnswer.customTitle,
         customTitleNote: customAnswer.customTitleNote
       }
@@ -171,6 +185,10 @@ export async function selectTitleNode(
   return {
     decisions: {
       ...state.decisions,
+      timings: {
+        ...state.decisions?.timings,
+        [timingKey]: promptWaitMs
+      },
       selectedTitle: selected
     }
   };

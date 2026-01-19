@@ -255,7 +255,16 @@ function parseImageConfig(input: string, recommendedStyle: ImageStyle): ImageCon
 export async function confirmImagesNode(
   state: ArticleState
 ): Promise<Partial<ArticleState>> {
+  return confirmImagesNodeWithTiming(state, 0);
+}
+
+async function confirmImagesNodeWithTiming(
+  state: ArticleState,
+  accumulatedWaitMs: number
+): Promise<Partial<ArticleState>> {
   const existingConfig = state.decisions?.images;
+  const timingKey = "07_confirm";
+  let promptWaitMs = accumulatedWaitMs;
 
   // 已确认，跳过
   if (existingConfig?.confirmed) {
@@ -282,6 +291,7 @@ export async function confirmImagesNode(
   // ========== 步骤2: 风格选择 ==========
   const prompt = await getPromptFn();
 
+  const styleStart = Date.now();
   const { styleInput } = await prompt<{ styleInput: string }>([
     {
       type: "list",
@@ -297,10 +307,12 @@ export async function confirmImagesNode(
       ]
     }
   ]);
+  promptWaitMs += Date.now() - styleStart;
 
   const selectedStyle = styleInput as ImageStyle;
 
   // ========== 步骤3: 数量输入（支持简写） ==========
+  const countStart = Date.now();
   const { countInput } = await prompt<{ countInput: string }>([
     {
       type: "input",
@@ -320,6 +332,7 @@ export async function confirmImagesNode(
       }
     }
   ]);
+  promptWaitMs += Date.now() - countStart;
 
   // ========== 步骤4: 解析配置 ==========
   const config = parseImageConfig(countInput, selectedStyle);
@@ -333,6 +346,7 @@ export async function confirmImagesNode(
   console.log(`比例: 16:9 (公众号统一横屏)\n`);
 
   // ========== 步骤5: 二次确认 ==========
+  const confirmStart = Date.now();
   const { confirmed } = await prompt<{ confirmed: boolean }>([
     {
       type: "confirm",
@@ -341,11 +355,12 @@ export async function confirmImagesNode(
       default: true
     }
   ]);
+  promptWaitMs += Date.now() - confirmStart;
 
   if (!confirmed) {
     // 重新输入
     console.log("\n请重新配置...\n");
-    return confirmImagesNode(state);
+    return confirmImagesNodeWithTiming(state, promptWaitMs);
   }
 
   console.log(`[confirm_images] 配置已保存\n`);
@@ -353,6 +368,10 @@ export async function confirmImagesNode(
   return {
     decisions: {
       ...state.decisions,
+      timings: {
+        ...state.decisions?.timings,
+        [timingKey]: promptWaitMs
+      },
       images: { ...config, confirmed: true }
     }
   };

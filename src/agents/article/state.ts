@@ -48,6 +48,7 @@ export interface Decisions {
   selectedTitle?: string;
   customTitleNote?: string;     // 自定义标题的备注（可选）
   regenerateTitles?: boolean;   // 是否重新生成标题
+  timings?: Record<string, number>; // 交互节点等待耗时（毫秒）
 }
 
 /**
