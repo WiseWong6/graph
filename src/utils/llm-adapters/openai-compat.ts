@@ -92,7 +92,7 @@ export class OpenAICompatAdapter implements LLMAdapter {
       return await this.callThinkingStream(client, config, messages, {
         ...options,
         suppressStreaming: options.suppressStreaming ?? config.suppress_streaming
-      });
+      }, options.nodeId);
     }
 
     const request: any = {
@@ -159,7 +159,8 @@ export class OpenAICompatAdapter implements LLMAdapter {
     client: OpenAI,
     config: LLMNodeConfig,
     messages: OpenAI.ChatCompletionMessageParam[],
-    options: LLMCallOptions
+    options: LLMCallOptions,
+    nodeId?: string
   ): Promise<LLMResponse> {
     const { restParams, maxTokens, temperature } = resolveParams(config, options);
 
@@ -180,14 +181,20 @@ export class OpenAICompatAdapter implements LLMAdapter {
 
     const isDeepSeek = config.provider === "deepseek";
     const providerName = isDeepSeek ? "DeepSeek" : "Volcengine";
+
     const suppressOutput = options.suppressStreaming ?? config.suppress_streaming;
+    const suppressByNode = nodeId ? outputCoordinator.shouldSuppressOutput(nodeId) : false;
+    const finalSuppress = suppressOutput || suppressByNode;
 
     let reasoningContent = "";
     let responseContent = "";
     let inReasoning = false;
 
-    if (!suppressOutput) {
+    if (!finalSuppress) {
       outputCoordinator.beginStream();
+      if (nodeId) {
+        outputCoordinator.beginNodeStream(nodeId);
+      }
       console.log(`[LLMClient] 💭 ${providerName} Thinking:`);
     }
 
@@ -198,7 +205,7 @@ export class OpenAICompatAdapter implements LLMAdapter {
         if (delta?.reasoning_content) {
           const text = delta.reasoning_content;
           reasoningContent += text;
-          if (!suppressOutput) {
+          if (!finalSuppress) {
             const release = await stdoutMutex.acquire();
             try {
               process.stdout.write(text);
@@ -210,14 +217,14 @@ export class OpenAICompatAdapter implements LLMAdapter {
         }
 
         if (delta?.content) {
-          if (inReasoning && !suppressOutput) {
+          if (inReasoning && !finalSuppress) {
             console.log();
             console.log(`[LLMClient] ✍️  ${providerName} Response:`);
             inReasoning = false;
           }
           const text = delta.content;
           responseContent += text;
-          if (!suppressOutput) {
+          if (!finalSuppress) {
             const release = await stdoutMutex.acquire();
             try {
               process.stdout.write(text);
@@ -228,11 +235,14 @@ export class OpenAICompatAdapter implements LLMAdapter {
         }
       }
 
-      if (!suppressOutput && (inReasoning || responseContent.length > 0)) {
+      if (!finalSuppress && (inReasoning || responseContent.length > 0)) {
         console.log();
       }
     } finally {
-      if (!suppressOutput) {
+      if (!finalSuppress) {
+        if (nodeId) {
+          outputCoordinator.endNodeStream(nodeId);
+        }
         outputCoordinator.endStream();
       }
     }

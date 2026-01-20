@@ -12,7 +12,7 @@ import { HuggingFaceEmbedding } from "@llamaindex/huggingface";
 import { LanceDBVectorStore } from "../vector-store/lancedb.js";
 import { join, resolve } from "path";
 import { existsSync } from "fs";
-import type { RetrieveOptions, QuoteNode, ArticleNode, TitleNode } from "./schema.js";
+import type { RetrieveOptions, QuoteNode, ArticleNode, TitleNode, PersonalChunkNode, RetrievePersonalOptions } from "./schema.js";
 
 // 内置轻量级中文词典（与 rag-formatter.ts 保持一致）
 const CHINESE_DICT = new Set([
@@ -91,8 +91,12 @@ class IndexManager {
   private quotesIndex: VectorStoreIndex | null = null;
   private articlesIndex: VectorStoreIndex | null = null;
   private titlesData: TitleNode[] = [];
+  private personalContentIndex: VectorStoreIndex | null = null;
+  private personalVoiceIndex: VectorStoreIndex | null = null;
   private indicesDir: string;
   private dataDir: string;
+  private personalLancedbDir: string;
+  private personalKbDir: string;
   private indicesLoaded: boolean = false;  // 防止重复加载
   private loadPromise: Promise<void> | null = null;  // 防止并发加载
 
@@ -100,6 +104,11 @@ class IndexManager {
     // 默认路径
     this.indicesDir = join(process.cwd(), ".index");
     this.dataDir = join(process.cwd(), "data");
+    this.personalLancedbDir = join(process.cwd(), "data", "lancedb_personal");
+    this.personalKbDir = join(process.cwd(), "data", "personal_articles");
+
+    // 从环境变量加载配置
+    this.loadFromEnv();
 
     // 设置嵌入模型（与 build-indices.ts 保持一致）
     // 使用本地 HuggingFace 模型进行嵌入
@@ -121,9 +130,24 @@ class IndexManager {
   /**
    * 设置路径
    */
-  setPaths(indicesDir: string, dataDir: string): void {
+  setPaths(indicesDir: string, dataDir: string, personalKbDir?: string, personalLancedbDir?: string): void {
     this.indicesDir = indicesDir;
     this.dataDir = dataDir;
+    if (personalKbDir) this.personalKbDir = personalKbDir;
+    if (personalLancedbDir) this.personalLancedbDir = personalLancedbDir;
+  }
+
+  /**
+   * 从环境变量加载配置
+   */
+  loadFromEnv(): void {
+    const { PERSONAL_KB_DIR, PERSONAL_LANCEDB_DIR } = process.env;
+    if (PERSONAL_KB_DIR) {
+      this.personalKbDir = resolve(process.cwd(), PERSONAL_KB_DIR);
+    }
+    if (PERSONAL_LANCEDB_DIR) {
+      this.personalLancedbDir = resolve(process.cwd(), PERSONAL_LANCEDB_DIR);
+    }
   }
 
   /**
@@ -157,6 +181,14 @@ class IndexManager {
 
       // 加载标题库数据（BM25 不需要向量索引）
       await this.loadTitlesData();
+
+      // 加载个人写作库索引（可选，降级处理）
+      try {
+        await this.loadPersonalContentIndex();
+        await this.loadPersonalVoiceIndex();
+      } catch (error) {
+        console.warn("[IndexManager] ⚠️ 个人写作库索引加载失败（降级继续）:", error);
+      }
 
       this.indicesLoaded = true;
       this.loadPromise = null;
@@ -290,6 +322,80 @@ class IndexManager {
   }
 
   /**
+   * 加载个人写作库 - Content 索引
+   */
+  private async loadPersonalContentIndex(): Promise<void> {
+    const indexDir = join(this.personalLancedbDir, "content");
+    const kbDir = this.personalKbDir;
+
+    if (!existsSync(indexDir)) {
+      console.warn(`[IndexManager] ⚠️ 个人写作库 Content 索引不存在: ${indexDir}`);
+      console.warn(`[IndexManager] 请先运行: npm run rag:personal:index`);
+      return;
+    }
+
+    console.log(`[IndexManager] 个人写作库目录: ${kbDir}`);
+
+    try {
+      const vectorStore = new LanceDBVectorStore({
+        uri: this.personalLancedbDir,
+        tableName: "personal_content_chunks"
+      });
+      await vectorStore.init();
+
+      const storageContext = await storageContextFromDefaults({
+        persistDir: indexDir,
+        vectorStore: vectorStore
+      });
+
+      this.personalContentIndex = await VectorStoreIndex.init({
+        storageContext
+      });
+      console.log(`[IndexManager] ✅ 个人写作库 Content 索引加载成功`);
+    } catch (error) {
+      console.error(`[IndexManager] ❌ 个人写作库 Content 索引加载失败: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * 加载个人写作库 - Voice 索引
+   */
+  private async loadPersonalVoiceIndex(): Promise<void> {
+    const indexDir = join(this.personalLancedbDir, "voice");
+    const kbDir = this.personalKbDir;
+
+    if (!existsSync(indexDir)) {
+      console.warn(`[IndexManager] ⚠️ 个人写作库 Voice 索引不存在: ${indexDir}`);
+      console.warn(`[IndexManager] 请先运行: npm run rag:personal:index`);
+      return;
+    }
+
+    console.log(`[IndexManager] 个人写作库目录: ${kbDir}`);
+
+    try {
+      const vectorStore = new LanceDBVectorStore({
+        uri: this.personalLancedbDir,
+        tableName: "personal_voice_chunks"
+      });
+      await vectorStore.init();
+
+      const storageContext = await storageContextFromDefaults({
+        persistDir: indexDir,
+        vectorStore: vectorStore
+      });
+
+      this.personalVoiceIndex = await VectorStoreIndex.init({
+        storageContext
+      });
+      console.log(`[IndexManager] ✅ 个人写作库 Voice 索引加载成功`);
+    } catch (error) {
+      console.error(`[IndexManager] ❌ 个人写作库 Voice 索引加载失败: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
    * 检索金句（向量检索）
    */
   async retrieveQuotes(query: string, options?: RetrieveOptions): Promise<QuoteNode[]> {
@@ -407,6 +513,79 @@ class IndexManager {
     return this.quotesIndex !== null ||
            this.articlesIndex !== null ||
            this.titlesData.length > 0;
+  }
+
+  /**
+   * 检索个人写作库（两路检索：Content + Voice）
+   *
+   * @param query - 检索查询
+   * @param options - 检索选项
+   * @returns { content: PersonalChunkNode[], voice: PersonalChunkNode[] }
+   */
+  async retrievePersonalRAG(query: string, options?: RetrievePersonalOptions): Promise<{ content: PersonalChunkNode[]; voice: PersonalChunkNode[] }> {
+    const startTime = Date.now();
+    const topKContent = options?.topKContent || 5;
+    const topKVoice = options?.topKVoice || 3;
+    const maxLength = options?.maxLength || 300;
+
+    let contentResults: PersonalChunkNode[] = [];
+    let voiceResults: PersonalChunkNode[] = [];
+
+    try {
+      if (!this.personalContentIndex) {
+        console.warn("[IndexManager] 个人写作库 Content 索引未加载，返回空结果");
+      } else {
+        const retriever = this.personalContentIndex.asRetriever({ similarityTopK: topKContent });
+        const results = await retriever.retrieve(query);
+        contentResults = results
+          .map(r => {
+            let text = "";
+            if ((r.node as any).text) {
+              text = (r.node as any).text;
+            } else {
+              const docContent = r.node.getContent(MetadataMode.NONE);
+              text = typeof docContent === "string" ? docContent : String(docContent);
+            }
+            return {
+              text: text.slice(0, maxLength),
+              metadata: r.node.metadata as PersonalChunkNode["metadata"],
+              score: r.score
+            };
+          })
+          .filter(r => r.text.length > 10);
+      }
+
+      if (!this.personalVoiceIndex) {
+        console.warn("[IndexManager] 个人写作库 Voice 索引未加载，返回空结果");
+      } else {
+        const retriever = this.personalVoiceIndex.asRetriever({ similarityTopK: topKVoice });
+        const results = await retriever.retrieve(query);
+        voiceResults = results
+          .map(r => {
+            let text = "";
+            if ((r.node as any).text) {
+              text = (r.node as any).text;
+            } else {
+              const docContent = r.node.getContent(MetadataMode.NONE);
+              text = typeof docContent === "string" ? docContent : String(docContent);
+            }
+            return {
+              text: text.slice(0, maxLength),
+              metadata: r.node.metadata as PersonalChunkNode["metadata"],
+              score: r.score
+            };
+          })
+          .filter(r => r.text.length > 10);
+      }
+
+      const elapsed = Date.now() - startTime;
+      console.log(`[IndexManager] 个人写作库检索完成: content=${contentResults.length}, voice=${voiceResults.length}, 耗时=${elapsed}ms`);
+
+      return { content: contentResults, voice: voiceResults };
+    } catch (error) {
+      console.error(`[IndexManager] 个人写作库检索失败: ${error}`);
+      return { content: [], voice: [] };
+    }
   }
 }
 

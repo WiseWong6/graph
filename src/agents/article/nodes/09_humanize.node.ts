@@ -76,7 +76,7 @@ export async function humanizeNode(state: ArticleState): Promise<Partial<Article
           selectedModel: state.decisions?.selectedModel,
           selectedModels: state.decisions?.selectedModels
         },
-        "humanize",
+        "09_humanize",
         {
           prompt,
           systemMessage: HUMANIZE_SYSTEM_MESSAGE

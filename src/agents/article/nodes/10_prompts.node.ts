@@ -95,7 +95,7 @@ export async function promptsNode(state: ArticleState): Promise<Partial<ArticleS
         selectedModel: state.decisions?.selectedModel,
         selectedModels: state.decisions?.selectedModels
       },
-      "image_prompt",
+      "10_prompts",
       { prompt, systemMessage: PROMPT_SYSTEM_MESSAGE }
     );
 
@@ -103,13 +103,13 @@ export async function promptsNode(state: ArticleState): Promise<Partial<ArticleS
     outputCoordinator.defer(() => {
       console.log("[10_prompts] LLM model:", config.model);
       console.log("[10_prompts] Prompts generated");
-    });
+    }, "10_prompts");
 
     // ========== 解析提示词 ==========
     // 添加原始响应日志（用于调试）
     outputCoordinator.defer(() => {
       console.log("[10_prompts] LLM raw response (first 500 chars):", response.text.substring(0, 500));
-    });
+    }, "10_prompts");
 
     const prompts = parsePrompts(response.text);
 
@@ -117,7 +117,7 @@ export async function promptsNode(state: ArticleState): Promise<Partial<ArticleS
     if (prompts.length === 0) {
       outputCoordinator.defer(() => {
         console.warn("[10_prompts] No prompts parsed from LLM response, using fallback");
-      });
+      }, "10_prompts");
       const fallbackPrompts = generateFallbackPrompts(count, style);
       return { imagePrompts: fallbackPrompts };
     }
@@ -131,7 +131,7 @@ export async function promptsNode(state: ArticleState): Promise<Partial<ArticleS
         console.log(`  ${i + 1}. ${p.paragraph_summary}`);
         console.log(`     ${p.prompt.substring(0, 80)}...`);
       });
-    });
+    }, "10_prompts");
 
     return {
       imagePrompts: promptStrings
@@ -139,13 +139,13 @@ export async function promptsNode(state: ArticleState): Promise<Partial<ArticleS
   } catch (error) {
     outputCoordinator.defer(() => {
       console.error(`[10_prompts] Failed to generate prompts: ${error}`);
-    });
+    }, "10_prompts");
 
     // 降级: 返回风格化通用提示词
     const fallbackPrompts = generateFallbackPrompts(count, style);
     outputCoordinator.defer(() => {
       console.log("[10_prompts] Using fallback prompts");
-    });
+    }, "10_prompts");
 
     return {
       imagePrompts: fallbackPrompts

@@ -18,6 +18,7 @@ import { readFileSync, existsSync } from "fs";
 import { ArticleState, WechatConfig } from "../state";
 import { parallelMap } from "../../../utils/concurrency.js";
 import { config } from "dotenv";
+import { outputCoordinator } from "../../../utils/llm-output.js";
 
 // 加载环境变量
 config({ path: process.cwd() + "/.env" });
@@ -87,9 +88,9 @@ async function promptForWechat(): Promise<WechatConfig> {
   );
 
   if (availableAccounts.length === 0) {
-    console.error("❌ 没有配置完整的公众号！");
-    console.error("请在 .env 中配置 WECHAT_APP_ID_1 和 WECHAT_APP_SECRET_1");
-    throw new Error("No WeChat account configured");
+    console.error("❌ 错误：没有配置完整的微信公众号账号");
+    console.error("请在 .env 文件中配置 WECHAT_APP_ID_1 和 WECHAT_APP_SECRET_1");
+    throw new Error("未找到可用的微信公众号配置，请检查 .env 文件");
   }
 
   const answer = await prompt<{ accountId: string }>([
@@ -147,16 +148,20 @@ interface UploadImageResponse {
  * @returns 更新的状态
  */
 export async function uploadImagesNode(state: ArticleState): Promise<Partial<ArticleState>> {
-  console.log("[11.5_upload] ========== NODE STARTED ==========");
-  console.log("[11.5_upload] ========== START ==========");
-  console.log("[11.5_upload] imagePaths:", state.imagePaths);
-  console.log("[11.5_upload] wechat config:", state.decisions?.wechat ? "SET" : "MISSING");
-  console.log("[11.5_upload] current state keys:", Object.keys(state));
+  outputCoordinator.defer(() => {
+    console.log("[11.5_upload] ========== 节点开始 ==========");
+    console.log("[11.5_upload] ========== START ==========");
+    console.log("[11.5_upload] 待上传图片路径:", state.imagePaths);
+    console.log("[11.5_upload] 微信配置状态:", state.decisions?.wechat ? "已配置" : "缺失");
+    console.log("[11.5_upload] 当前 state keys:", Object.keys(state));
+  });
 
   if (!state.imagePaths || state.imagePaths.length === 0) {
-    console.log("[11.5_upload] No images to upload");
-    console.log("[11.5_upload] Returning empty uploadedImageUrls");
-    console.log("[11.5_upload] ========== END ==========");
+    outputCoordinator.defer(() => {
+      console.log("[11.5_upload] 没有需要上传的图片");
+      console.log("[11.5_upload] 返回空的 uploadedImageUrls");
+      console.log("[11.5_upload] ========== END ==========");
+    });
     return {
       uploadedImageUrls: []
     };
@@ -167,13 +172,19 @@ export async function uploadImagesNode(state: ArticleState): Promise<Partial<Art
 
   // 回退机制：如果 wechat 配置缺失，提示用户选择
   if (!wechatConfig) {
-    console.warn("[11.5_upload] ⚠️  微信配置缺失，触发回退机制...");
+    outputCoordinator.defer(() => {
+      console.warn("[11.5_upload] ⚠️  微信配置缺失，触发回退机制");
+    });
     wechatConfig = await promptForWechat();
     // 将选择的配置保存到 state 中
-    console.log("[11.5_upload] ✅ 微信配置已保存");
+    outputCoordinator.defer(() => {
+      console.log("[11.5_upload] ✅ 微信配置已保存到 state");
+    });
   }
 
-  console.log(`[11.5_upload] Uploading ${state.imagePaths.length} images...`);
+  outputCoordinator.defer(() => {
+    console.log(`[11.5_upload] 准备上传 ${state.imagePaths.length} 张图片...`);
+  });
 
   // 构建 uploadImage 函数期望的配置（添加 apiUrl）
   const uploadConfig: WechatApiConfig = {
@@ -185,18 +196,21 @@ export async function uploadImagesNode(state: ArticleState): Promise<Partial<Art
   // ========== 并行上传 ==========
   const concurrency = parseInt(process.env.UPLOAD_CONCURRENCY || "5");
 
-  console.log(`[11.5_upload] Starting parallel upload (concurrency: ${concurrency})...`);
+  outputCoordinator.defer(() => {
+    console.log(`[11.5_upload] Starting parallel upload (concurrency: ${concurrency})...`);
+  });
 
   const uploadResults = await parallelMap(
     state.imagePaths,
     async (imagePath, index) => {
-      console.log(`[11.5_upload] Uploading ${index + 1}/${state.imagePaths.length}: ${imagePath}`);
+      outputCoordinator.defer(() => {
+        console.log(`[11.5_upload] 正在上传第 ${index + 1}/${state.imagePaths.length} 张图片: ${imagePath}`);
+      });
 
       try {
         // 读取图片
         if (!existsSync(imagePath)) {
-          console.error(`[11.5_upload] File not found: ${imagePath}`);
-          return { index, url: null as string | null };
+          throw new Error(`图片文件不存在: ${imagePath}`);
         }
 
         const imageBuffer = readFileSync(imagePath);
@@ -209,8 +223,7 @@ export async function uploadImagesNode(state: ArticleState): Promise<Partial<Art
 
         return { index, url: result };
       } catch (error) {
-        console.error(`[11.5_upload] Failed to upload ${imagePath}: ${error}`);
-        return { index, url: null as string | null };
+        throw new Error(`上传第 ${index + 1} 张图片失败 (${imagePath}): ${error instanceof Error ? error.message : String(error)}`);
       }
     },
     concurrency
@@ -221,13 +234,25 @@ export async function uploadImagesNode(state: ArticleState): Promise<Partial<Art
   for (const result of uploadResults) {
     if (result.url) {
       uploadedUrls[result.index] = result.url;
-      console.log(`[11.5_upload] Uploaded: ${result.url}`);
+      outputCoordinator.defer(() => {
+        console.log(`[11.5_upload] 第 ${result.index + 1} 张图片上传成功: ${result.url}`);
+      });
     }
   }
 
-  console.log(`[11.5_upload] Uploaded ${uploadedUrls.length} images successfully`);
-  console.log("[11.5_upload] Returning uploadedImageUrls:", uploadedUrls);
-  console.log("[11.5_upload] ========== END ==========");
+  // 验证上传结果
+  const expectedCount = state.imagePaths.length;
+  const actualCount = uploadedUrls.filter(url => url && url.length > 0).length;
+
+  if (actualCount < expectedCount) {
+    const failedCount = expectedCount - actualCount;
+    throw new Error(`图片上传不完整：预期 ${expectedCount} 张，实际成功 ${actualCount} 张，失败 ${failedCount} 张`);
+  }
+
+  outputCoordinator.defer(() => {
+    console.log(`[11.5_upload] ✅ 所有 ${expectedCount} 张图片上传完成`);
+    console.log("[11.5_upload] ========== END ==========");
+  });
 
   // 返回上传结果和 wechat 配置（如果使用了回退机制）
   const result: Partial<ArticleState> = {
@@ -278,17 +303,17 @@ async function uploadImage(
   );
 
   if (!response.ok) {
-    throw new Error(`Upload failed: ${response.statusText}`);
+    throw new Error(`图片上传失败：HTTP ${response.status} ${response.statusText}`);
   }
 
   const data = await response.json() as UploadImageResponse;
 
   if (data.errcode && data.errcode !== 0) {
-    throw new Error(`Upload failed: ${data.errmsg} (errcode: ${data.errcode})`);
+    throw new Error(`图片上传失败：${data.errmsg} (错误码: ${data.errcode})`);
   }
 
   if (!data.url) {
-    throw new Error("Upload failed: no URL returned");
+    throw new Error("图片上传失败：未返回图片 URL");
   }
 
   return data.url;
@@ -314,17 +339,17 @@ async function getAccessToken(config: WechatApiConfig): Promise<string> {
   );
 
   if (!response.ok) {
-    throw new Error(`Failed to get stable access_token: ${response.statusText}`);
+    throw new Error(`获取微信 access_token 失败：HTTP ${response.status} ${response.statusText}`);
   }
 
   const data = await response.json() as { access_token: string; errcode?: number; errmsg?: string };
 
   if (data.errcode && data.errcode !== 0) {
-    throw new Error(`Failed to get stable access_token: ${data.errmsg} (errcode: ${data.errcode})`);
+    throw new Error(`获取微信 access_token 失败：${data.errmsg} (错误码: ${data.errcode})`);
   }
 
   if (!data.access_token) {
-    throw new Error("Failed to get stable access_token: no token returned");
+    throw new Error("获取微信 access_token 失败：未返回 token");
   }
 
   return data.access_token;

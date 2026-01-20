@@ -25,6 +25,7 @@
     "test-search-mcp": "tsx src/agents/article/nodes/test-search.ts",
     "parse-articles": "tsx scripts/parse-articles.ts",
     "build-indices": "tsx scripts/build-indices.ts",
+    "rag:personal:index": "tsx scripts/build-personal-indices.ts",
     "test-retrieval": "tsx scripts/test-retrieval.ts",
     "test-image": "tsx scripts/test-image.ts",
     "test-prompts": "tsx scripts/test-prompts.ts",
@@ -75,6 +76,7 @@
     "markdown-it": "^14.1.0",
     "openai": "^6.16.0",
     "ora": "^8.1.1",
+    "pdf-parse": "^1.1.1",
     "playwright": "^1.49.1",
     "uuid": "^11.0.5",
     "xlsx": "^0.18.5"

@@ -28,6 +28,7 @@ import { createLogger } from "../../../utils/logger.js";
 import { ErrorHandler, ValidationError, retry } from "../../../utils/errors.js";
 import { parseHKRScore } from "../../../utils/prompt-parser.js";
 import { renderTemplate } from "../../../utils/template.js";
+import { retrievePersonalRAG } from "../../../rag/retrieval/personal-rag.js";
 
 config({ path: resolve(process.cwd(), ".env") });
 
@@ -101,6 +102,39 @@ export async function rewriteNode(state: ArticleState): Promise<Partial<ArticleS
     hasRAG: rag.hasContent
   });
 
+  // ========== 检索个人写作库 ==========
+  log.startStep("retrieve_personal_rag");
+  let personalRAGContent = "(无)";
+  let personalRAGVoice = "(无)";
+  try {
+    const draftPreview = contentToRewrite.slice(0, 600);
+    const queryParts = [
+      title,
+      brief.topic,
+      ...brief.keyInsights.slice(0, 3),
+      draftPreview
+    ].filter(Boolean).join(" ");
+
+    const personalRAGResult = await retrievePersonalRAG(queryParts, {
+      topKContent: 5,
+      topKVoice: 3,
+      maxLength: 300
+    });
+
+    personalRAGContent = personalRAGResult.content;
+    personalRAGVoice = personalRAGResult.voice;
+
+    log.completeStep("retrieve_personal_rag", {
+      contentCount: personalRAGResult.stats.contentCount,
+      voiceCount: personalRAGResult.stats.voiceCount,
+      retrievalTime: personalRAGResult.stats.retrievalTime,
+      fallback: personalRAGResult.stats.fallback
+    });
+  } catch (error) {
+    log.error(`检索个人写作库失败: ${error}`);
+    log.completeStep("retrieve_personal_rag", { fallback: true });
+  }
+
   // ========== 从配置读取提示词 ==========
   log.startStep("build_prompt");
   const prompts = getPromptTemplates();
@@ -117,7 +151,9 @@ export async function rewriteNode(state: ArticleState): Promise<Partial<ArticleS
       : "(无)",
     quotes: rag.hasContent && rag.quotes.length > 0
       ? rag.quotes.slice(0, 3).join("\n")
-      : "(无)"
+      : "(无)",
+    personal_rag_content: personalRAGContent,
+    personal_rag_voice: personalRAGVoice
   });
 
   log.completeStep("build_prompt", { systemMsgLength: systemMessage.length, userPromptLength: userPrompt.length });

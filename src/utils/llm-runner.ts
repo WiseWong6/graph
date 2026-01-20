@@ -20,8 +20,13 @@ export async function callLLMWithFallback(
   const { config: primaryConfig, usedOverride } = resolveNodeLLMConfig(nodeId, selection);
   const primaryClient = new LLMClient(primaryConfig);
 
+  const optionsWithNodeId = {
+    ...options,
+    nodeId
+  };
+
   try {
-    const response = await primaryClient.call(options);
+    const response = await primaryClient.call(optionsWithNodeId);
     return { response, config: primaryConfig, usedFallback: false };
   } catch (error) {
     if (!usedOverride) {
@@ -42,7 +47,7 @@ export async function callLLMWithFallback(
     );
 
     const fallbackClient = new LLMClient(fallbackConfig);
-    const response = await fallbackClient.call(options);
+    const response = await fallbackClient.call(optionsWithNodeId);
     return { response, config: fallbackConfig, usedFallback: true };
   }
 }

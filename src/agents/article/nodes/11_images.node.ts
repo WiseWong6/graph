@@ -20,6 +20,8 @@ import OpenAI from "openai";
 import { createLogger } from "../../../utils/logger.js";
 import { retry } from "../../../utils/errors.js";
 import { parallelMap } from "../../../utils/concurrency.js";
+import { outputCoordinator } from "../../../utils/llm-output.js";
+import { displayImageInTerminal } from "../../../utils/terminal-image.js";
 
 const log = createLogger("10_images");
 
@@ -125,27 +127,36 @@ export async function imagesNode(state: ArticleState): Promise<Partial<ArticleSt
   const imagePaths: string[] = [];
   const errors: string[] = [];
 
-  console.log("[10_images] Processing results:", results.length);
+  outputCoordinator.defer(() => {
+    console.log("[10_images] Processing results:", results.length);
+  });
 
   for (const result of results) {
-    if (!result) {
-      console.log("[10_images] Skipping undefined result");
-      continue;
+      if (!result) {
+        outputCoordinator.defer(() => {
+          console.log("[10_images] Skipping undefined result");
+        });
+        continue;
+      }
+      if (result.path) {
+        imagePaths[result.index] = result.path;
+        outputCoordinator.defer(() => {
+          console.log(`[10_images] Image ${result.index}: ${result.path}`);
+        });
+      } else if (result.error) {
+        errors.push(`Image ${result.index + 1}: ${result.error}`);
+        outputCoordinator.defer(() => {
+          console.log(`[10_images] Image ${result.index} failed: ${result.error}`);
+        });
     }
-
-    if (result.path) {
-      imagePaths[result.index] = result.path;
-      console.log(`[10_images] Image ${result.index}: ${result.path}`);
-    } else if (result.error) {
-      errors.push(`Image ${result.index + 1}: ${result.error}`);
-      console.log(`[10_images] Image ${result.index} failed: ${result.error}`);
     }
-  }
 
   // 过滤掉空洞（undefined 元素）
   const validPaths = imagePaths.filter(p => p !== undefined && p !== null && p !== "") as string[];
-  console.log("[10_images] Valid paths:", validPaths.length);
-  console.log("[10_images] Valid paths array:", validPaths);
+  outputCoordinator.defer(() => {
+    console.log("[10_images] Valid paths:", validPaths.length);
+    console.log("[10_images] Valid paths array:", validPaths);
+  });
 
   log.completeStep("generate_images", {
     success: validPaths.length,
@@ -158,13 +169,19 @@ export async function imagesNode(state: ArticleState): Promise<Partial<ArticleSt
 
   log.success(`Complete in ${timer.log()}`);
 
+  for (let i = 0; i < validPaths.length; i++) {
+    await displayImageInTerminal(validPaths[i], i);
+  }
+
   // Debug: 确认返回值
-  console.log("[10_images] ========== RETURNING ==========");
-  console.log("[10_images] Returning imagePaths:", validPaths);
-  console.log("[10_images] imagePaths.length:", validPaths.length);
-  console.log("[10_images] imagePaths is array:", Array.isArray(validPaths));
-  console.log("[10_images] imagePaths[0]:", validPaths[0]);
-  console.log("[10_images] =================================");
+  outputCoordinator.defer(() => {
+    console.log("[10_images] ========== RETURNING ==========");
+    console.log("[10_images] Returning imagePaths:", validPaths);
+    console.log("[10_images] imagePaths.length:", validPaths.length);
+    console.log("[10_images] imagePaths is array:", Array.isArray(validPaths));
+    console.log("[10_images] imagePaths[0]:", validPaths[0]);
+    console.log("[10_images] =================================");
+  });
 
   // 确保返回值是一个非空数组
   if (!Array.isArray(validPaths) || validPaths.length === 0) {

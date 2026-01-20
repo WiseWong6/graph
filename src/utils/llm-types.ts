@@ -8,6 +8,7 @@ export interface LLMCallOptions {
   stream?: boolean;
   suppressStreaming?: boolean;
   params?: Record<string, unknown>;
+  nodeId?: string;
 }
 
 export interface LLMResponse {

@@ -15,9 +15,11 @@
 import readline from "readline";
 import chalk from "chalk";
 import ora from "ora";
+import inquirer from "inquirer";
 import { fullArticleGraph } from "../agents/article/graph.js";
 import type { ArticleState } from "../agents/article/state.js";
 import { ResumeManager } from "./resume-manager.js";
+import { outputCoordinator } from "../utils/llm-output.js";
 
 /**
  * 节点耗时汇总
@@ -149,6 +151,20 @@ async function showFullOutput(nodeName: string, state: ArticleState): Promise<vo
 }
 
 /**
+ * 从文件读取内容
+ */
+async function readFromFile(filePath: string): Promise<string | null> {
+  try {
+    const fs = await import("fs");
+    const content = fs.readFileSync(filePath, "utf-8");
+    return content;
+  } catch (error) {
+    console.error(chalk.red(`无法读取文件: ${filePath}`));
+    return null;
+  }
+}
+
+/**
  * 用户输入主题
  */
 async function promptForTopic(): Promise<string> {
@@ -158,7 +174,7 @@ async function promptForTopic(): Promise<string> {
   });
 
   return new Promise((resolve) => {
-    rl.question(chalk.cyan("请输入文章主题: "), (answer) => {
+    rl.question(chalk.cyan("请输入文章主题 (或使用 --file <路径> 从文件读取): "), (answer) => {
       rl.close();
       if (!answer || answer.trim() === "") {
         console.log(chalk.red("主题不能为空，请重新输入"));
@@ -342,60 +358,61 @@ async function handleNodeError(
 
   // 从某节点重新运行
   if (answer === "n") {
-    console.log(chalk.cyan("\n📋 可用节点列表:\n"));
-
-    // 显示所有节点
+    // 构建节点选择选项
     const nodeEntries = Object.entries(NODE_INFO);
-    nodeEntries.forEach(([key, info], index) => {
+    const choices = nodeEntries.map(([key, info]) => {
       const status = timingSummaries.some(s => s.nodeName === key)
         ? chalk.green("✓")
         : chalk.gray("○");
-      console.log(chalk.gray(`[${index.toString().padStart(2, " ")}]`) +
-                  chalk.white(` ${status} `) +
-                  chalk.cyan(info.name));
-      console.log(chalk.gray(`     ${info.description}`));
+      return {
+        name: `${status} ${info.name} - ${info.description}`,
+        value: key,
+        short: info.name
+      };
     });
 
-    const nodeAnswer = await new Promise<string>((resolve) => {
-      const rl2 = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-      });
-      rl2.question(
-        chalk.yellow("\n输入节点编号或按 Enter 取消: "),
-        (ans) => {
-          rl2.close();
-          resolve(ans.trim());
-        }
-      );
-    });
+    const { selectedNode } = await inquirer.prompt([{
+      type: 'list',
+      name: 'selectedNode',
+      message: '选择要重新运行的节点:',
+      choices: [
+        ...choices,
+        new inquirer.Separator("────────────────────────────────────────────────────────"),
+        { name: '取消', value: '__CANCEL__', short: '取消' }
+      ],
+      pageSize: 15,
+    }]);
 
-    if (nodeAnswer) {
-      const nodeIndex = parseInt(nodeAnswer, 10);
-      if (!isNaN(nodeIndex) && nodeIndex >= 0 && nodeIndex < nodeEntries.length) {
-        const selectedNodeKey = nodeEntries[nodeIndex][0];
-        console.log(chalk.cyan(`\n🔄 从节点 "${NODE_INFO[selectedNodeKey].name}" 重新运行...\n`));
+    if (selectedNode && selectedNode !== '__CANCEL__') {
+      const selectedNodeKey = selectedNode;
+      console.log(chalk.cyan(`\n🔄 从节点 "${NODE_INFO[selectedNodeKey].name}" 重新运行...\n`));
 
-        // 需要重置状态到该节点之前
-        // 由于 LangGraph 的限制，我们需要创建新的 thread 并重新运行到该节点
-        // 这是一个简化实现，实际可能需要更复杂的 checkpoint 管理
-        console.log(chalk.yellow("注意：将从头重新运行到该节点\n"));
+      // 使用 ResumeManager 从指定节点恢复
+      try {
+        const manager = new ResumeManager(fullArticleGraph);
+        const checkpoints = await manager.listCheckpoints(threadId);
 
-        try {
+        // 查找目标节点之前的 checkpoint
+        const targetCheckpoint = checkpoints.find(cp => cp.node === selectedNodeKey);
+        if (targetCheckpoint) {
+          console.log(chalk.yellow(`找到 checkpoint: ${targetCheckpoint.checkpointId}\n`));
+          await manager.resume(threadId, targetCheckpoint.checkpointId);
+        } else {
+          // 如果找不到 checkpoint，从头开始
+          console.log(chalk.yellow(`未找到 "${NODE_INFO[selectedNodeKey].name}" 的 checkpoint，将从头开始\n`));
           const newThreadId = `step-article-${Date.now()}`;
           const { fullArticleGraph: graph } = await import("../agents/article/graph.js");
           const config = { configurable: { thread_id: newThreadId } };
 
           console.log(chalk.gray(`新 Thread ID: ${newThreadId}\n`));
-
-          // 重新开始流程
           await graph.invoke({ prompt: stateValue?.prompt || "" }, config);
-          await exitWithSummary(newThreadId, [], workflowStartTime, interactiveWaitMs, true);
-        } catch (rerunError) {
-          await handleNodeError(rerunError, threadId, timingSummaries, workflowStartTime, interactiveWaitMs, stateValue);
         }
-        return;
+
+        await exitWithSummary(threadId, [], workflowStartTime, interactiveWaitMs, true);
+      } catch (rerunError) {
+        await handleNodeError(rerunError, threadId, timingSummaries, workflowStartTime, interactiveWaitMs, stateValue);
       }
+      return;
     }
 
     console.log(chalk.gray("取消重新运行\n"));
@@ -449,9 +466,23 @@ export async function main() {
     }
   } else {
     // 新建流程
-    // 从参数获取主题，如果没有则提示用户输入
-    const argPrompt = args.find(a => !a.startsWith("--"));
-    prompt = argPrompt || await promptForTopic();
+    // 检查 --file 参数
+    const fileArgIndex = args.indexOf("--file");
+    if (fileArgIndex !== -1 && args[fileArgIndex + 1]) {
+      const filePath = args[fileArgIndex + 1];
+      console.log(chalk.gray(`从文件读取: ${filePath}`));
+      const fileContent = await readFromFile(filePath);
+      if (!fileContent) {
+        console.log(chalk.red("读取失败，回退到手动输入"));
+        prompt = await promptForTopic();
+      } else {
+        prompt = fileContent.trim();
+      }
+    } else {
+      // 从参数获取主题，如果没有则提示用户输入
+      const argPrompt = args.find(a => !a.startsWith("--"));
+      prompt = argPrompt || await promptForTopic();
+    }
     threadId = `step-article-${Date.now()}`;
   }
 
@@ -617,6 +648,8 @@ export async function main() {
         const focusNode = getStreamFocusNode(nodeName);
         if (focusNode) {
           tracker.streamFocusNode = focusNode;
+          // 设置输出优先级：聚焦节点的流式输出优先
+          outputCoordinator.setPriorityNode(focusNode);
         }
 
         // 判断是否需要延迟输出（用于 Prompts/Images 并行场景）
@@ -784,6 +817,8 @@ export async function main() {
 
         // 当聚焦节点完成时，清除聚焦状态并输出缓冲的日志
         if (tracker.streamFocusNode && nodeName === tracker.streamFocusNode) {
+          // 清除优先级节点设置，释放其他节点的输出
+          outputCoordinator.clearPriorityNode(tracker.streamFocusNode);
           tracker.streamFocusNode = null;
           if (tracker.deferredCompletions.length > 0) {
             const completions = tracker.deferredCompletions.splice(0);

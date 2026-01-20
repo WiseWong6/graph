@@ -3,6 +3,26 @@
  */
 
 /**
+ * 写作组件类型
+ */
+export enum ComponentType {
+  // Content 组件
+  CONCEPT = "concept",
+  FRAMEWORK = "framework",
+  METHOD = "method",
+  CASE = "case",
+  DATA = "data",
+  CHECKLIST = "checklist",
+  COUNTERPOINT = "counterpoint",
+  // Voice 组件
+  HOOK_OPENING = "hook_opening",
+  TURNING_POINT = "turning_point",
+  METAPHOR = "metaphor",
+  CLOSING = "closing",
+  SENTENCE_PATTERN = "sentence_pattern"
+}
+
+/**
  * 检索结果项
  */
 export interface RetrievedNode {
@@ -45,6 +65,34 @@ export interface TitleNode {
   title: string;
   source: string;
   score?: number;
+}
+
+/**
+ * 个人写作库检索结果
+ */
+export interface PersonalChunkNode {
+  text: string;
+  metadata: {
+    article_id: string;
+    article_title: string;
+    section_path?: string;
+    component_type: ComponentType;
+    pillar?: string;
+    tags?: string[];
+    date?: string;
+    channel?: string;
+  };
+  score?: number;
+}
+
+/**
+ * 个人写作库检索选项
+ */
+export interface RetrievePersonalOptions {
+  topKContent?: number;
+  topKVoice?: number;
+  minScore?: number;
+  maxLength?: number;
 }
 
 /**

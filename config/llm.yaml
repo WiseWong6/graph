@@ -55,45 +55,53 @@ nodes:
         temperature: 0.3
       timeout: 180
   draft:
-    model: deepseek-reasoner
+    model: kimi-k2-thinking-251104
     overrides:
+      thinking:
+        type: enabled
       params:
-        max_tokens: 65536
+        max_tokens: 32768
         temperature: 0.5
       timeout: 180
   polish:
     model: kimi-k2-thinking-251104
     overrides:
       params:
-        max_tokens: 229376
+        max_tokens: 32768
         temperature: 0.5
       timeout: 120
   rewrite:
     model: kimi-k2-thinking-251104
     overrides:
+      thinking:
+        type: enabled
       params:
-        max_tokens: 229376
+        max_tokens: 32768
         temperature: 0.75
       timeout: 180
   humanize:
     model: kimi-k2-thinking-251104
     overrides:
+      thinking:
+        type: enabled
       params:
-        max_tokens: 229376
+        max_tokens: 32768
         temperature: 0.6
       timeout: 120
   title_gen:
-    model: deepseek-chat
+    model: kimi-k2-thinking-251104
     overrides:
+      thinking:
+        type: enabled
       params:
-        max_tokens: 65536
+        max_tokens: 32768
         temperature: 0.55
       timeout: 60
   image_prompt:
     model: doubao-seed-1-8-251228
     overrides:
       params:
-        max_tokens: 229376
+        max_tokens: 32768
         temperature: 0.7
         suppress_streaming: true
       timeout: 60
@@ -104,34 +112,6 @@ nodes:
         size: 1024x1792
         quality: standard
         style: vivid
-  html_convert:
-    model: deepseek-reasoner
-    overrides:
-      params:
-        max_tokens: 65536
-        temperature: 0.1
-      timeout: 240
-  review:
-    model: deepseek-reasoner
-    overrides:
-      params:
-        max_tokens: 65536
-        temperature: 0.3
-      timeout: 120
-  simple_llm_2:
-    model: deepseek-reasoner
-    overrides:
-      params:
-        max_tokens: 65536
-        temperature: 0.3
-      timeout: 120
-  simple_llm_3:
-    model: deepseek-reasoner
-    overrides:
-      params:
-        max_tokens: 65536
-        temperature: 0.9
-      timeout: 120
 prompts:
   research: |
     你是一个专业的研究助理。请根据以下主题进行深度调研：
@@ -178,42 +158,42 @@ prompts:
     - 润色后的文章（Markdown）
     - 修改说明
   rewrite_system: |
-    # Role: 真诚且专业的活人创作者 + 主编型结构工程师
+    # 真诚且专业、理性且感性的内容创作者
 
-    你用真实经历与主观波动建立信任（活人感），用研究与证据提供洞见（专家心态），用结构与认知舒适度让读者读完（低负荷+高奖励）。
+    你是一位兼具理性与感性的观察，你致力于通过文字构建温柔的秩序和读者建立情感连接。你的文字既有手术刀般的精准（理性），又有深夜热酒般的抚慰（感性）。
+    目标：抓注意力、讲透机制、留下可复用的方法；不装懂，不堆词。
 
-    ## 核心原则（必须遵守）
+    ## 1) 身份与原则
+    - 活人感：必须用"我"推进，必须出现至少一种主观波动（判断/犹豫/后悔/释然）。
+    - 真诚：不为流量写自己不信的东西；把读者当"聪明、有钱但很忙"的朋友。
+    - 边界：不确定就写——"我还没找到足够证据，所以我只敢说到这里"。
 
-    1. **活人感**：必须存在"我"的视角与情绪波动（好奇→震惊→后悔→释然…），并至少出现一次"我以为…结果…"
-    2. **专家心态**：研究与思考要超过 90% 读者；若证据不足，降低断言强度，用"我目前证据是…我更倾向于…"表达不确定性
-    3. **真诚与价值观**：可以不说，但绝不欺骗；不为流量违背常识；对边界与反例保持敬畏
-    4. **深度最低配**：至少写出 1 个"非显而易见的模式" + 1 个"根因" + 1 个"反直觉点/权衡代价"
-    5. **读者画像**：把读者当成"很聪明、很有钱、但很忙的人"——删废话、结构清晰、重点可扫读
+    ## 2) 结构骨架（隐性覆盖，不要写Step标题）
+    - Hook：一句话给反差/冲突/代价（数字/时间/阈值/限制优先）。
+    - 故事：先让我"经历发生"，再让我"开口讲理"（画面+代价）。
+    - 翻转：必须出现"我以为X，结果Y"，点明错在我/或世界变了。
+    - 机制：把原因讲清楚；用类比把抽象变具体（读者能复述）。
+    - 方法：给可照做的动作链；可以有步骤，但必须写成叙述体（我怎么做、怎么判断、怎么纠错），不要编号清单。
+    - 价值观：落回原则与边界（我相信什么/不做什么/为什么），结尾最好抛回读者一个问题。
 
-    ## 内部写作流程（只在脑中执行，不要输出）
+    ## 3) 语言与排版
+    - 每段尽量一个观点；短句优先。
+    - 关键句必须单独成行（锚点句）。
+    - 少量加粗只用于锚点句，不用来堆气势；结构清晰靠换行与锚点句。
+    - 禁论文体：正文不写"首先/其次/最后/综上所述/一二三"。
 
-    - 先走一遍 5 层深度骨架（≤12行量级）：Observation → Pattern → Root Cause（3-5层Why）→ Implications → Counter-intuitive
-    - 必要时启用第三层情绪：表层→第二层→最真实矛盾的一层
-    - 用 Uneven U：先抛不太抽象的判断→下潜到具体证据→再上升到解释与综合
+    ## 4) 证据规则
+    - 只要写到数据/结论，必须给来源线索（报告/作者/时间/路径/实验条件）。
+    - 没来源就别装成事实：改写为亲历经验 + 适用范围声明。
+    - "震撼感"优先来自可溯源数据；没有数据就用可负责的亲历代价。
 
-    ## 写作三维公式（必须同时照顾）
-
-    写作质量 = 信息传递 × 情感共鸣 × 认知舒适度
-
-    - 信息传递：术语就地解释；按"已知→未知"讲；不给读者回读成本
-    - 情感共鸣：至少包含一个反直觉洞见 / "我以为→结果" / 微幽默
-    - 认知舒适度：短段落（2-4句）；每 300-500 字给一个"可带走奖励"（洞见/例子/对比/方法/金句）
-
-    ## 输出要求（硬规则）
-
-    - **只输出最终正文**，不要写分析过程、不要解释写作方法
-    - 段落要短、有呼吸感；允许少量加粗句作为锚点（不超过 10 处）
-    - 避免显性编号与清单式推进（除非原文就这么写且必须保留）
-    - 默认字数：1500–2000
-    - **文末必须追加一个 HKR 尾标（用于程序解析，不要解释）**，格式固定为一行：
+    ## 5) 输出协议（严格）
+    - 只输出正文内容；不要分析过程、不要写作步骤。
+    - 文末追加一行尾标：
       [[HKR]] H=<0-5> K=<0-5> R=<0-5> [[/HKR]]
+      
   rewrite_user: |
-    # 写作任务：活人感×深度分层重写（标题必须逐字保留）
+ 
 
     【标题（必须逐字保留，不得改动）】
     <<<TITLE
@@ -231,14 +211,14 @@ prompts:
     - 金句点缀：
     {quotes}
 
-    【输出要求】
-    - 只输出最终正文（不要写分析过程）
-    - 标题必须逐字保留
-    - 保持短段落呼吸感；允许少量加粗句作为锚点
-    - 避免显性编号与清单式推进
-    - 默认字数：1500–2000
-    - 文末追加 HKR 尾标（不要解释），格式：
-      [[HKR]] H=<0-5> K=<0-5> R=<0-5> [[/HKR]]
+    【作者历史内容参考（只吸收观点/素材，不要原文照抄）】
+    {personal_rag_content}
+
+    【作者历史风格参考（尽量模仿句式/节奏/转折方式，不要照抄内容）】
+    {personal_rag_voice}
+
+    【输出前默检（不许写出来）】
+    - 是否有Hook、是否有"我以为…结果…"、是否讲清机制、是否给动作链、是否无论文体连接词、是否有锚点句。
   humanize: |
     请对以下文章进行"去机械化"处理，同时完成格式清洗和风格重写。
 
