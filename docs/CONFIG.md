@@ -1,75 +1,98 @@
 # 配置指南
 
-## LLM 配置 (`config/llm.yaml`)
+## 环境变量配置
 
-LLM 配置分为四个层级（低 → 高优先级）：
+项目使用 `.env` 文件管理环境变量。创建 `.env` 文件（参考 `.env.example`）：
 
-1. `providers.*.defaults` - 提供商默认设置
-2. `models.*.defaults` - 模型默认设置
-3. `nodes.*.overrides` - 节点级覆盖
-4. 运行时覆盖（交互式选择）
+```bash
+# DeepSeek API（Research 节点）
+DEEPSEEK_API_KEY=sk-xxx
+
+# Anthropic API（Draft/Rewrite/Humanize 节点）
+ANTHROPIC_API_KEY=sk-ant-xxx
+
+# 火山引擎 API（生图）
+ARK_API_KEY=xxx
+
+# 微信公众号配置（Upload + Draftbox 节点）
+WECHAT_APP_ID_1=wx1234567890abcdef
+WECHAT_APP_SECRET_1=abcdef1234567890abcdef1234567890
+
+WECHAT_APP_ID_2=wx9876543210fedcba
+WECHAT_APP_SECRET_2=fedcba9876543210fedcba9876543210
+
+# 上传并发数（可选，默认 5）
+UPLOAD_CONCURRENCY=5
+
+# 调试模式（可选）
+DEBUG_TIME=true
+```
+
+## LLM 配置 (`src/config/llm.ts`)
+
+LLM 配置采用 TypeScript 代码方式，支持节点级模型覆盖。
 
 ### 结构说明
 
-- `defaults.model`：全局回退模型 ID
-- `providers`：提供商设置和默认值
-- `models`：模型注册条目（提供商 + 模型 + 默认值）
-- `nodes`：每个节点的模型选择和覆盖
-- `prompts`：可选的节点级 Prompt 模板
+- `DEFAULT_MODEL`：全局回退模型 ID
+- `PROVIDERS`：提供商配置
+- `MODELS`：模型注册（提供商 + 模型 + 默认参数）
+- `NODE_OVERRIDES`：节点级模型覆盖
 
-### 环境变量
+### 支持的提供商
 
-```bash
-export DEEPSEEK_API_KEY="..."
-export ARK_API_KEY="..."
-```
+1. **DeepSeek**
+   - `deepseek-chat` - 聊天模型
+   - `deepseek-reasoner` - 思考模型（Research 节点）
 
-### 示例
+2. **Anthropic**
+   - `claude-3-5-sonnet-20241022` - 高质量生成
+   - `claude-3-5-haiku-20241022` - 快速生成
 
-```yaml
-defaults:
-  model: deepseek-reasoner
+3. **Volcengine（火山引擎）**
+   - `doubao-pro-32k` - 支持深度思考和流式输出
 
-providers:
-  deepseek:
-    type: openai_compat
-    api_key_env: DEEPSEEK_API_KEY
-    base_url: https://api.deepseek.com
+### 节点级模型配置
 
-models:
-  deepseek-reasoner:
-    name: "DeepSeek Reasoner (思考模型)"
-    provider: deepseek
-    model: deepseek-reasoner
-    defaults:
-      params:
-        max_tokens: 8192
-        temperature: 0.3
-
-nodes:
-  research:
-    model: deepseek-reasoner
-    overrides:
-      params:
-        temperature: 0.3
-```
-
-### 迁移助手
-
-```bash
-tsx scripts/migrate-llm-config.ts --input config/llm.old.yaml --output config/llm.yaml
+```typescript
+// Research 节点：使用 DeepSeek 思考模型
+NODE_OVERRIDES = {
+  "02_research": {
+    model: "deepseek-reasoner",
+    params: {
+      temperature: 0.3,
+      max_tokens: 8192
+    }
+  },
+  // Draft 节点：使用 Anthropic Sonnet
+  "06_draft": {
+    model: "claude-3-5-sonnet-20241022",
+    params: {
+      temperature: 0.7,
+      max_tokens: 4096
+    }
+  },
+  // Humanize 节点：使用 Anthropic Haiku（快速）
+  "09_humanize": {
+    model: "claude-3-5-haiku-20241022",
+    params: {
+      temperature: 0.5,
+      max_tokens: 8192
+    }
+  }
+};
 ```
 
 ### 交互式模型选择
 
 CLI 支持：
 - 使用配置默认值
-- 选择全局模型
+- 选择全局模型（`01_select_model` 节点）
 - 每节点覆盖模型
 
-选择结果会持久化回 `config/llm.yaml`。
+选择结果会保存到 `state.decisions.selectedModel`。
 
-## 输出配置 (`config/output.yaml`)
+## 输出配置 (`src/config/output.ts`)
 
 输出配置文件定义了文章生成工作流的输出目录结构、文件命名规则和 Checkpoint 设置。
 
@@ -82,66 +105,59 @@ CLI 支持：
 
 ### 输出目录配置
 
-```yaml
-output:
-  # 输出根目录（相对路径或绝对路径）
-  base_dir: "./output"
-
-  # 目录结构配置
-  structure:
-    research: "research/"      # 调研资料
-    drafts: "drafts/"          # 文章草稿
-    images: "images/"          # 配图
-    final: "final/"            # 最终版本
-    logs: "_logs/"             # 日志
-    checkpoints: "_checkpoints/"  # Checkpoint
-    temp: "_temp/"             # 临时文件
-
-  # 目录创建策略
-  creation_policy: "auto"     # auto / manual / strict
+```typescript
+export const OUTPUT_CONFIG = {
+  output: {
+    base_dir: "./output",
+    structure: {
+      research: "research/",
+      drafts: "drafts/",
+      images: "images/",
+      final: "final/",
+      logs: "_logs/",
+      checkpoints: "_checkpoints/",
+      temp: "_temp/"
+    },
+    creation_policy: "auto"
+  }
+};
 ```
 
 ### 文件命名规则
 
-```yaml
-naming:
-  # 运行 ID 格式
-  run_id_format: "article-{datetime}"
-
-  # 日期时间格式（Python strftime 格式）
-  date_format: "%Y%m%d_%H%M%S"
-
-  # 文件命名模板
-  files:
-    research: "research-{run_id}.md"
-    draft: "draft-v{version}-{run_id}.md"
-    polished: "polished-v{version}-{run_id}.md"
-    titles: "titles-{run_id}.md"
-    image: "image-{index}-{run_id}.png"
-    image_prompt: "image-prompt-{index}-{run_id}.txt"
-    html: "article-{run_id}.html"
-    final: "final-{run_id}.md"
-    log: "run-{run_id}.log"
-    checkpoint: "checkpoint-{node_name}-{run_id}.json"
+```typescript
+export const OUTPUT_CONFIG = {
+  naming: {
+    run_id_format: "article-{datetime}",
+    date_format: "%Y%m%d_%H%M%S",
+    files: {
+      research: "research-{run_id}.md",
+      draft: "draft-v{version}-{run_id}.md",
+      polished: "polished-v{version}-{run_id}.md",
+      titles: "titles-{run_id}.md",
+      image: "image-{index}-{run_id}.png",
+      image_prompt: "image-prompt-{index}-{run_id}.txt",
+      html: "article-{run_id}.html",
+      final: "final-{run_id}.md",
+      log: "run-{run_id}.log",
+      checkpoint: "checkpoint-{node_name}-{run_id}.json"
+    }
+  }
+};
 ```
 
 ### 输出结构模式
 
-```yaml
-layout:
-  # 布局模式
-  # - flat: 所有文件放在对应的 type 目录下
-  # - hierarchical: 每次运行创建独立的子目录
-  # - hybrid: 混合模式（推荐）
-  mode: "hybrid"
-
-  # hybrid 模式配置（推荐）
-  hybrid:
-    # 内容文件按运行分组
-    content_mode: "hierarchical"
-
-    # 日志文件集中管理
-    log_mode: "centralized"
+```typescript
+export const OUTPUT_CONFIG = {
+  layout: {
+    mode: "hybrid",
+    hybrid: {
+      content_mode: "hierarchical",
+      log_mode: "centralized"
+    }
+  }
+};
 ```
 
 **hybrid 模式结构示例：**
@@ -165,163 +181,227 @@ output/
 
 ### Checkpoint 配置
 
-```yaml
-checkpoint:
-  # 是否启用 Checkpoint
-  enabled: true
+Checkpoint 使用 SQLite 持久化，位于 `src/checkpoints/article/checkpoints.db`。
 
-  # Checkpoint 保存位置
-  dir: "./src/checkpoints"
-
-  # 保存策略
-  # - every_node: 每个节点执行完都保存
-  # - on_success: 只在节点成功时保存
-  # - on_failure: 只在节点失败时保存
-  # - end_only: 只在最后保存
-  save_strategy: "every_node"
-
-  # 保留策略
-  retention:
-    policy: "keep_n"    # all / latest_only / keep_n / by_date
-    value: 10          # 保留最近 10 个
-
-  # 压缩配置
-  compression:
-    enabled: false
-    format: "gzip"      # gzip, bz2, lzma
-    threshold: 1048576  # 大于 1MB 才压缩
+```typescript
+// graph.ts
+const checkpointer = SqliteSaver.fromConnString(
+  join(process.cwd(), "src", "checkpoints", "article", "checkpoints.db")
+);
 ```
 
-### 日志配置
+**Checkpoint 特性：**
+- 自动保存每个节点的状态
+- 支持中断和恢复
+- ResumeManager 可列出所有历史 thread 和 checkpoint
 
-```yaml
-logging:
-  # 日志级别
-  level: "INFO"        # DEBUG / INFO / WARNING / ERROR / CRITICAL
+## NPM 脚本
 
-  # 日志格式
-  format: "detailed"   # text / json / detailed
+### 主要脚本
 
-  # 控制台输出
-  console:
-    enabled: true
-    colored: true
-    level: "INFO"
+```bash
+# 开发
+npm run dev                # 监听模式启动
+npm run build              # 编译 TypeScript
+npm run start              # 运行编译后的代码
 
-  # 文件输出
-  file:
-    enabled: true
-    max_size: 10485760  # 10MB
-    backup_count: 5
-    append: true
+# 交互式 CLI
+npm run step               # 步进模式（主入口）
+npm run step -- --resume   # 恢复会话
+
+# 单节点测试
+npm run research           # 交互式调研
+npm run test-titles        # 标题生成测试
+npm run test-research      # 调研节点测试
+npm run test-search        # 搜索功能测试
+npm run test-interactive  # 交互节点测试
+
+# RAG 相关
+npm run parse-articles     # 解析文章库 Excel
+npm run build-indices      # 构建向量索引
+npm run rag:personal:index # 构建个人知识库索引
+npm run test-retrieval     # 测试检索功能
+
+# 图片流程测试
+npm run test-image         # 图片生成测试
+npm run test-prompts       # 图片提示词测试
+npm run test-prompts:quick # 快速提示词测试
+npm run test-full-pipeline # 完整图片流程测试
+
+# HTML 流程测试
+npm run test-html-flow     # HTML 转换测试
+
+# Resume 功能测试
+npm run test-resume        # ResumeManager 测试
+
+# 测试
+npm test                   # 运行所有测试
+npm run test:unit          # 单元测试
+npm run test:integration   # 集成测试
+npm run test:e2e           # 端到端测试
+
+# 代码质量
+npm run lint               # ESLint 检查
+npm run format             # Prettier 格式化
+npm run typecheck          # TypeScript 类型检查
 ```
 
-### 清理策略
+## 搜索超时配置
 
-```yaml
-cleanup:
-  # 是否启用自动清理
-  enabled: true
+搜索超时在 `src/adapters/parallel-search.ts` 中配置：
 
-  # 清理时机
-  # - on_start: 运行开始时清理
-  # - on_end: 运行结束时清理
-  # - scheduled: 定时清理
-  # - manual: 手动清理
-  trigger: "on_start"
-
-  # 清理规则
-  rules:
-    temp:
-      age: "0s"          # 临时文件立即删除
-      pattern: "*"
-
-    logs:
-      age: "30d"        # 日志文件保留 30 天
-      pattern: "*.log"
-
-    checkpoints:
-      policy: "keep_n"
-      value: 10
-
-    outputs:
-      age: "90d"        # 输出文件保留 90 天
-      exclude: ["final/*", "important/*"]
-
-  # 清理前确认
-  confirm_before_cleanup: false
+```typescript
+const SEARCH_TIMEOUT_MS = 30000; // 30 秒
 ```
 
-### 内容保留策略
+**降级顺序：**
+1. WebResearch (Google via Playwright) - 优先级 1
+2. Firecrawl - 优先级 2
 
-```yaml
-retention:
-  # 最终版本保留策略
-  final:
-    policy: "all"       # all / by_date / by_count
+## 图片生成配置
 
-  # 中间产物保留策略
-  intermediate:
-    drafts: 5           # 草稿保留数量
-    images: "all"       # 图片保留策略（all / used_only）
-    research: "latest"  # 调研资料保留策略（all / latest）
+### Ark API 配置
+
+```bash
+# 环境变量
+ARK_API_KEY=xxx
 ```
 
-### 导出配置
+### 支持的图片风格
 
-```yaml
-export:
-  # 支持的导出格式
-  formats:
-    markdown:
-      enabled: true
-      extension: ".md"
-
-    html:
-      enabled: true
-      extension: ".html"
-      include_styles: true
-      inline_images: false
-
-    pdf:
-      enabled: false
-      extension: ".pdf"
-      page_size: "A4"
-      margin: "2cm"
-
-    docx:
-      enabled: false
-      extension: ".docx"
-
-  # 导出目标位置
-  destinations:
-    markdown: "./output/final"
-    html: "./output/final"
-    pdf: "./output/exports"
-    docx: "./output/exports"
+```typescript
+export const IMAGE_STYLES = {
+  infographic: "信息图表风格",
+  healing: "治愈系风格",
+  pixar: "皮克斯风格",
+  sokamono: "单色极简风格",
+  handdrawn: "手绘风格"
+};
 ```
 
-### 可用变量
+### 图片生成参数
 
-**时间相关：**
-- `{timestamp}`：Unix 时间戳（1737117022）
-- `{datetime}`：格式化的日期时间（20250117_143022）
-- `{date}`：日期（20250117）
-- `{time}`：时间（143022）
-- `{year}`：年份（2025）
-- `{month}`：月份（01）
-- `{day}`：日期（17）
-- `{hour}`：小时（14）
-- `{minute}`：分钟（30）
-- `{second}`：秒（22）
+```typescript
+// 11_images.node.ts
+const IMAGE_CONFIG = {
+  width: 1024,
+  height: 1024,
+  model: "doubao-seedream",
+  disableWatermark: true
+};
+```
 
-**运行相关：**
-- `{run_id}`：运行 ID（如 article-20250117_143022）
-- `{sequence}`：递增序列号
-- `{uuid}`：UUID v4
+## 微信 API 配置
 
-**内容相关：**
-- `{version}`：版本号
-- `{index}`：序号
-- `{type}`：类型
-- `{node_name}`：节点名称
+### Stable Token API
+
+使用微信推荐的 `/cgi-bin/stable_token` 接口：
+
+```typescript
+// 12_upload.node.ts
+async function getAccessToken(config: WechatApiConfig): Promise<string> {
+  const response = await fetch(
+    `${config.apiUrl}/cgi-bin/stable_token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "client_credential",
+        appid: config.appId,
+        secret: config.appSecret
+      })
+    }
+  );
+  // ...
+}
+```
+
+### 上传 API
+
+使用 `/cgi-bin/media/uploadimg` 上传图文消息图片：
+
+```typescript
+async function uploadImage(
+  imageBuffer: Buffer,
+  config: WechatApiConfig
+): Promise<string> {
+  const formData = new FormData();
+  formData.append("media", imageBuffer, {
+    filename: "image.png",
+    contentType: "image/png"
+  });
+
+  const response = await fetch(
+    `${config.apiUrl}/cgi-bin/media/uploadimg?access_token=${token}`,
+    {
+      method: "POST",
+      headers: formData.getHeaders(),
+      body: formData.getBuffer()
+    }
+  );
+  // ...
+}
+```
+
+## 调试配置
+
+### 启用调试日志
+
+```bash
+# 时间调试（显示并行事件）
+DEBUG_TIME=true npm run step
+
+# 完整调试输出
+DEBUG=true npm run step
+```
+
+### 查看检查点
+
+```bash
+# SQLite 查看工具
+sqlite3 src/checkpoints/article/checkpoints.db
+```
+
+## 性能配置
+
+### 并发控制
+
+```bash
+# 上传并发数（默认 5）
+UPLOAD_CONCURRENCY=5
+```
+
+### 内存使用
+
+- Node.js >= 20.0.0
+- 推荐内存：至少 4GB
+- 大型向量索引可能需要更多内存
+
+## 故障排除
+
+### 常见问题
+
+1. **搜索超时**
+   - 检查网络连接
+   - 增加 `SEARCH_TIMEOUT_MS`
+   - 检查代理设置
+
+2. **LLM API 失败**
+   - 检查 API Key 是否正确
+   - 检查余额是否充足
+   - 查看错误日志
+
+3. **图片生成失败**
+   - 检查 `ARK_API_KEY` 是否正确
+   - 检查账户余额
+   - 尝试其他图片风格
+
+4. **微信上传失败**
+   - 检查 `WECHAT_APP_ID` 和 `WECHAT_APP_SECRET`
+   - 检查账号权限（需要服务号）
+   - 检查文件格式（必须是 PNG/JPG）
+
+5. **恢复失败**
+   - 检查 `checkpoints.db` 是否损坏
+   - 尝试删除损坏的 checkpoint
+   - 查看错误日志
