@@ -44,58 +44,58 @@ nodes:
     model: deepseek-reasoner
     overrides:
       params:
-        max_tokens: 1024
+        max_tokens: 65536
         temperature: 0.7
       timeout: 120
   research:
     model: deepseek-reasoner
     overrides:
       params:
-        max_tokens: 8192
+        max_tokens: 65536
         temperature: 0.3
       timeout: 180
   draft:
     model: deepseek-reasoner
     overrides:
       params:
-        max_tokens: 8192
+        max_tokens: 65536
         temperature: 0.5
       timeout: 180
   polish:
-    model: deepseek-reasoner
+    model: kimi-k2-thinking-251104
     overrides:
       params:
-        max_tokens: 4096
+        max_tokens: 229376
         temperature: 0.5
       timeout: 120
   rewrite:
     model: kimi-k2-thinking-251104
     overrides:
       params:
-        max_tokens: 8192
+        max_tokens: 229376
         temperature: 0.75
       timeout: 180
   humanize:
     model: kimi-k2-thinking-251104
     overrides:
       params:
-        max_tokens: 8192
+        max_tokens: 229376
         temperature: 0.6
       timeout: 120
   title_gen:
     model: deepseek-chat
     overrides:
       params:
-        max_tokens: 2048
+        max_tokens: 65536
         temperature: 0.55
       timeout: 60
   image_prompt:
-    model: deepseek-chat
+    model: doubao-seed-1-8-251228
     overrides:
       params:
-        max_tokens: 2048
+        max_tokens: 229376
         temperature: 0.7
-      suppress_streaming: true
+        suppress_streaming: true
       timeout: 60
   image_gen:
     model: doubao-seedream-4-5-251128
@@ -108,28 +108,28 @@ nodes:
     model: deepseek-reasoner
     overrides:
       params:
-        max_tokens: 16384
+        max_tokens: 65536
         temperature: 0.1
       timeout: 240
   review:
     model: deepseek-reasoner
     overrides:
       params:
-        max_tokens: 2048
+        max_tokens: 65536
         temperature: 0.3
       timeout: 120
   simple_llm_2:
     model: deepseek-reasoner
     overrides:
       params:
-        max_tokens: 300
+        max_tokens: 65536
         temperature: 0.3
       timeout: 120
   simple_llm_3:
     model: deepseek-reasoner
     overrides:
       params:
-        max_tokens: 500
+        max_tokens: 65536
         temperature: 0.9
       timeout: 120
 prompts:
