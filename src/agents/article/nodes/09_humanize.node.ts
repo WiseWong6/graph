@@ -87,6 +87,18 @@ export async function humanizeNode(state: ArticleState): Promise<Partial<Article
 
     let humanized = result.response.text;
 
+    // ========== 完整性检查 ==========
+    const inputLength = input.length;
+    const outputLength = humanized.length;
+    const ratio = outputLength / inputLength;
+
+    console.log(`[09_humanize] 完整性检查: 输入 ${inputLength} 字, 输出 ${outputLength} 字, 比率 ${(ratio * 100).toFixed(1)}%`);
+
+    if (ratio < 0.3) {
+      console.warn(`[09_humanize] ⚠️ 输出长度异常（仅 ${(ratio * 100).toFixed(1)}%），可能被截断或未完成`);
+      console.warn(`[09_humanize] 建议: 增加超时时间或检查模型响应`);
+    }
+
     // ========== 后处理：确定性格式清洗 ==========
     // 使用 TypeScript 处理刚性规则 (破折号、引号、空格等)，确保格式一致性
     const formatted = humanizeFormat(humanized);
