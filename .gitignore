@@ -17,6 +17,11 @@ build/
 # Output directory
 output/
 
+# Config files (sensitive configs)
+config/
+src/config/*.yaml
+src/config/*.json
+
 # Data files (keep structure, ignore heavy content)
 data/*.xlsx
 data/*.jsonl
