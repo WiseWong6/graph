@@ -14,13 +14,11 @@ build/
 .env.local
 .env.*.local
 
+# Config files with sensitive references
+config/llm.yaml
+
 # Output directory
 output/
-
-# Config files (sensitive configs)
-config/
-src/config/*.yaml
-src/config/*.json
 
 # Data files (keep structure, ignore heavy content)
 data/*.xlsx

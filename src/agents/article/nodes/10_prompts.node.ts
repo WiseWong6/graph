@@ -37,7 +37,7 @@ const STYLE_PREFIXES: Record<ImageStyle, string> = {
 
   sokamono: `Cartoon illustration, minimalist, simple and vivid lines, calm healing atmosphere, clean and fresh color, light blue background, style by sokamono. Clean 16:9 horizontal layout.`,
 
-  handdrawn: `Hand-drawn notebook style on grid paper, marker pen and ballpoint pen, light gray background with paper texture and grid lines, rough ink lines, uneven width 2px-4px, high saturation colors at 90% transparency for highlights and decorative elements only. Use bright green for positive accents, alert red for attention markers, calm blue for structural elements, warm yellow for emphasis. Clean 16:9 horizontal layout.`
+  handdrawn: `Hand-drawn illustration on cream-colored paper with visible texture. Colored pencil line art with visible strokes, light watercolor shading with gentle smudging. Warm atmosphere, light doodles, playful but clean. High readability. 16:9 horizontal layout. Colors are for decorative highlights only.`
 };
 
 /**
@@ -48,7 +48,7 @@ const STYLE_NAMES: Record<ImageStyle, string> = {
   healing: "治愈系插画",
   pixar: "粗线条插画",
   sokamono: "描边插画",
-  handdrawn: "方格纸手绘"
+  handdrawn: "彩铅水彩手绘"
 };
 
 /**
@@ -60,6 +60,7 @@ export interface ImagePrompt {
   prompt: string;        // 英文提示词
   style: string;        // 风格描述
   mood: string;         // 情感基调
+  composition?: string; // 构图类型
 }
 
 /**
@@ -181,6 +182,14 @@ function buildPromptPrompt(article: string, count: number, style: ImageStyle): s
   lines.push(stylePrefix);
   lines.push("");
 
+  lines.push("画面构图（必须多样化）:");
+  lines.push("  - Split screen comparison (Left vs Right)");
+  lines.push("  - Three-column layout (Step 1, 2, 3)");
+  lines.push("  - Central focal point (Hero object)");
+  lines.push("  - Isometric view (3D overview)");
+  lines.push("  - Roadmap/Timeline path");
+  lines.push("");
+
   lines.push("负面约束:");
   lines.push("  - no watermark, no logo, no random letters, no gibberish text");
   lines.push("  - avoid overcrowded layout, avoid messy typography");
@@ -194,9 +203,10 @@ function buildPromptPrompt(article: string, count: number, style: ImageStyle): s
   lines.push("请输出 JSON 数组,每个元素包含:");
   lines.push("  - paragraph_index: 对应段落序号");
   lines.push("  - paragraph_summary: 段落摘要");
-  lines.push("  - prompt: 英文图片提示词（必须包含上述风格规范）");
+  lines.push("  - prompt: 英文图片提示词（结构：[Composition] + [Visual Metaphor] + [Environment] + [Style Prefix] + [Negative Constraints]）");
   lines.push("  - style: 风格描述");
   lines.push("  - mood: 情感基调");
+  lines.push("  - composition: 构图类型（如 Split screen, Central focal point 等）");
   lines.push("");
 
   lines.push("示例:");
@@ -204,9 +214,10 @@ function buildPromptPrompt(article: string, count: number, style: ImageStyle): s
   {
     "paragraph_index": 1,
     "paragraph_summary": "AI Agent 概念介绍",
-    "prompt": "AI agents as helpful digital assistants working alongside humans, ${stylePrefix.substring(0, 100)}...",
+    "prompt": "Split screen comparison, left side shows a human struggling with messy papers, right side shows a smart robot organizing them neatly. ${stylePrefix.substring(0, 100)}...",
     "style": "${styleName}",
-    "mood": "专业、友好"
+    "mood": "专业、友好",
+    "composition": "Split screen comparison"
   }
 ]`);
 
@@ -220,19 +231,23 @@ const PROMPT_SYSTEM_MESSAGE = `你是一个专业的配图设计师,擅长为文
 
 你的核心能力:
 - 理解文章核心内容
-- 选择合适的视觉元素
+- 选择合适的视觉元素（善用隐喻）
 - 使用英文描述场景
 - 平衡美观和信息传达
 
 提示词创作原则:
-1. 主体明确: 画面要表达什么?
-2. 环境清晰: 背景和场景
-3. 风格统一: 与其他配图协调
-4. 色彩和谐: 符合情感基调
-5. 严格遵守风格规范
+1. 视觉隐喻（关键）: 拒绝抽象概念，将概念转化为具体物体。
+   - 错误：Business partnership (两个人握手)
+   - 正确：Two gears interlocking perfectly, or A bridge connecting two cliffs
+   - 错误：Data network (抽象的线)
+   - 正确：A busy city map with glowing traffic lines
+2. 构图多样: 不要每张图都是中间放个东西。使用左右对比、三段式、透视等。
+3. 风格统一: 严格遵守给定的 Style Prefix。
+4. 色彩和谐: 符合情感基调。
+5. 负面约束: 严禁生成乱码文字。
 
 提示词结构:
-[主体描述] + [环境/背景] + [风格规范] + [负面约束] + [技术参数]
+[Composition] + [Visual Metaphor/Subject] + [Environment] + [Style Prefix] + [Negative Constraints]
 
 颜色使用规范（重要）:
 - 颜色描述仅用于视觉装饰和高亮
@@ -272,7 +287,8 @@ function parsePrompts(text: string): ImagePrompt[] {
                 paragraph_summary: item.paragraph_summary || "",
                 prompt: item.prompt,
                 style: item.style || "扁平化科普图",
-                mood: item.mood || "专业"
+                mood: item.mood || "专业",
+                composition: item.composition || ""
               });
             }
           }
@@ -296,7 +312,8 @@ function parsePrompts(text: string): ImagePrompt[] {
                 paragraph_summary: item.paragraph_summary || "",
                 prompt: item.prompt,
                 style: item.style || "扁平化科普图",
-                mood: item.mood || "专业"
+                mood: item.mood || "专业",
+                composition: item.composition || ""
               });
             }
           }
@@ -320,7 +337,8 @@ function parsePrompts(text: string): ImagePrompt[] {
                 paragraph_summary: item.paragraph_summary || "",
                 prompt: item.prompt,
                 style: item.style || "扁平化科普图",
-                mood: item.mood || "专业"
+                mood: item.mood || "专业",
+                composition: item.composition || ""
               });
             }
           }
@@ -343,7 +361,8 @@ function parsePrompts(text: string): ImagePrompt[] {
               paragraph_summary: item.paragraph_summary || "",
               prompt: item.prompt,
               style: item.style || "扁平化科普图",
-              mood: item.mood || "专业"
+              mood: item.mood || "专业",
+              composition: item.composition || ""
             });
           }
         } catch {
